@@ -1,0 +1,33 @@
+{
+  "functions": {
+    "predeploy": [
+      "npm --prefix functions/ run lint",
+      "npm --prefix functions/ run build"
+    ],
+
+    "source": "functions"
+  },
+  "database": {
+    "rules": "database.rules.json"
+  },
+  "storage": {
+    "rules": "storage.rules"
+  },
+  "emulators": {
+    "functions": {
+      "port": 5001
+    },
+    "database": {
+      "port": 9000
+    },
+    "pubsub": {
+      "port": 8086
+    },
+    "ui": {
+      "enabled": true
+    }
+  },
+  "remoteconfig": {
+    "template": "remoteconfig.template.json"
+  }
+}

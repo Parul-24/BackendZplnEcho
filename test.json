@@ -1,0 +1,178 @@
+{
+  "SavedAvatarURL": "",
+  "Tournaments": {
+    "DE_Thu Dec 31 2020_5": {
+      "1": {
+        "1": {
+          "credits": 55.5,
+          "highScore": 26980
+        },
+        "2": {
+          "credits": 62.5,
+          "highScore": 29070
+        },
+        "3": {
+          "credits": 65,
+          "highScore": 29620
+        },
+        "4": {
+          "credits": 66,
+          "highScore": 29725
+        },
+        "5": {
+          "credits": 64.5,
+          "highScore": 29140
+        },
+        "avgScore": 28907,
+        "currentGame": 6,
+        "highScore": 29725,
+        "seriesScore": 144535
+      },
+      "creditPrize": 6000,
+      "jackpotPrize_HighScores": 45
+    },
+    "MainEvent": [
+      null,
+      {
+        "1": {
+          "credits": 52,
+          "highScore": 25690
+        },
+        "2": {
+          "credits": 56.25,
+          "highScore": 26415
+        },
+        "3": {
+          "credits": 53.75,
+          "highScore": 26225
+        },
+        "4": {
+          "credits": 60.5,
+          "highScore": 28885
+        },
+        "5": {
+          "credits": 54.25,
+          "highScore": 26280
+        },
+        "avgScore": 26699,
+        "currentGame": 6,
+        "highScore": 28885,
+        "seriesScore": 133495
+      },
+      {
+        "1": {
+          "credits": 60,
+          "highScore": 27785
+        },
+        "2": {
+          "credits": 64.25,
+          "highScore": 28250
+        },
+        "3": {
+          "credits": 59.25,
+          "highScore": 28145
+        },
+        "4": {
+          "credits": 61.25,
+          "highScore": 28070
+        },
+        "5": {
+          "credits": 63.75,
+          "highScore": 28975
+        },
+        "avgScore": 28245,
+        "currentGame": 6,
+        "highScore": 28975,
+        "seriesScore": 141225
+      }
+    ],
+    "OtherEvent": [
+      null,
+      {
+        "1": {
+          "credits": 63.25,
+          "highScore": 28390
+        },
+        "2": {
+          "credits": 63.75,
+          "highScore": 29185
+        },
+        "3": {
+          "credits": 56,
+          "highScore": 25320
+        },
+        "4": {
+          "credits": 67,
+          "highScore": 29580
+        },
+        "5": {
+          "credits": 56.75,
+          "highScore": 25895
+        },
+        "avgScore": 27674,
+        "currentGame": 6,
+        "highScore": 29580,
+        "seriesScore": 138370
+      },
+      {
+        "1": {
+          "credits": 67.75,
+          "highScore": 30450
+        },
+        "2": {
+          "credits": 50.25,
+          "highScore": 24035
+        },
+        "3": {
+          "credits": 63,
+          "highScore": 28120
+        },
+        "4": {
+          "credits": 59.75,
+          "highScore": 27450
+        },
+        "5": {
+          "credits": 57.75,
+          "highScore": 25585
+        },
+        "avgScore": 27128,
+        "currentGame": 6,
+        "highScore": 30450,
+        "seriesScore": 135640
+      }
+    ]
+  },
+  "audience": 0,
+  "canShare": 0,
+  "conversionRate": 220,
+  "country": "",
+  "credits": 33.5,
+  "currentGameID": 1,
+  "currentGameLevel": "Novice",
+  "directAncestor": 0,
+  "email": "",
+  "firstName": "",
+  "flowTotal": 0,
+  "gender": 0,
+  "highScore": 0,
+  "instagramLink": "b",
+  "lastName": "",
+  "level": 0,
+  "myHighScoreCR": 40,
+  "myHighScoreRank": 3,
+  "myPositionCR": 100,
+  "myPositionRank": 1,
+  "mySkillCR": 80,
+  "mySkillRank": 3,
+  "noOfDirects": 0,
+  "noOfGamesPlayed": 0,
+  "phone": "",
+  "registrationDate": "31/12/2020 14:40:42",
+  "registrationLink": "",
+  "tiktokLink": "@a",
+  "totalPreGameScore": 0,
+  "totalZenduja": 0,
+  "userId": "02185d81bd6554d3bbdf5c5d079fa84753e6c619",
+  "userName": "Luis",
+  "youtubeLink": ""
+}
