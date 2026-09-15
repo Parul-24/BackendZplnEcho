@@ -743,15 +743,7 @@ export const GetInviteLink = functions.https.onRequest(async (request, response)
 export const GetUserByInviteCodeAPI = functions.https.onRequest(async (request, response) => {
   try {
     const data = getRequestData(request);
-    const incomingCode = normalizeInviteCodeCandidate(firstNonEmpty(
-      data.inviteCode,
-      data.code,
-      data.parentInviteCode,
-      data.parentId,
-      data["parent-id"],
-      data.link,
-      data.url
-    ));
+    const incomingCode = extractParentInviteCodeCandidateFromRequestData(data);
 
     if (!incomingCode) {
       response.status(400).json({

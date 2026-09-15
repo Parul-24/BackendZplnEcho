@@ -11,6 +11,35 @@ function firstNonEmpty(...values: unknown[]): string {
   return "";
 }
 
+const INVITE_VALUE_KEYS = [
+  "parentInviteCode",
+  "parentId",
+  "parent-id",
+  "parent_id",
+  "parentCode",
+  "parent-code",
+  "inviteCode",
+  "invite_code",
+  "code",
+  "branchCode",
+  "branch_code"
+];
+
+const BRANCH_LINK_KEYS = [
+  "+url",
+  "~referring_link",
+  "$canonical_url",
+  "$deeplink_path",
+  "link",
+  "url",
+  "branch-link",
+  "branch_url",
+  "deep_link",
+  "deeplink",
+  "deeplink_path",
+  "deeplinkPath"
+];
+
 function extractCandidateFromPath(value: string): string {
   const trimmed = asTrimmedString(value);
   if (!trimmed) return "";
@@ -21,7 +50,7 @@ function extractCandidateFromPath(value: string): string {
   const segments = candidate.split("/").map((segment) => segment.trim()).filter(Boolean);
   for (let index = segments.length - 1; index >= 0; index -= 1) {
     const segment = segments[index];
-    const normalized = segment.replace(/^invite[-_]/i, "").trim();
+    const normalized = segment.replace(/^invited?[-_]/i, "").trim();
     if (normalized) {
       return normalized;
     }
@@ -35,30 +64,18 @@ export function normalizeInviteCodeCandidate(value: unknown): string {
 
   if (typeof value === "object" && !Array.isArray(value)) {
     const objectValue = value as Record<string, unknown>;
-    const nestedCandidate = firstNonEmpty(
-      objectValue.parentInviteCode,
-      objectValue.parentId,
-      objectValue["parent-id"],
-      objectValue.parent_id,
-      objectValue.parentCode,
-      objectValue["parent-code"],
-      objectValue.inviteCode,
-      objectValue.invite_code,
-      objectValue.code,
-      objectValue.branchCode,
-      objectValue.branch_code,
-      objectValue.link,
-      objectValue.url,
-      objectValue["branch-link"],
-      objectValue["branch_url"],
-      objectValue["deep_link"],
-      objectValue["deeplink"],
-      objectValue["deeplink_path"],
-      objectValue["deeplinkPath"]
-    );
+    for (const key of [...INVITE_VALUE_KEYS, ...BRANCH_LINK_KEYS]) {
+      if (objectValue[key] !== undefined && objectValue[key] !== null) {
+        const nestedCandidate = normalizeInviteCodeCandidate(objectValue[key]);
+        if (nestedCandidate) return nestedCandidate;
+      }
+    }
 
-    if (nestedCandidate) {
-      return normalizeInviteCodeCandidate(nestedCandidate);
+    for (const nestedValue of Object.values(objectValue)) {
+      if (nestedValue && typeof nestedValue === "object") {
+        const nestedCandidate = normalizeInviteCodeCandidate(nestedValue);
+        if (nestedCandidate) return nestedCandidate;
+      }
     }
 
     return "";
@@ -68,7 +85,7 @@ export function normalizeInviteCodeCandidate(value: unknown): string {
   if (!rawValue) return "";
 
   try {
-    const parsedUrl = new URL(rawValue);
+    const parsedUrl = new URL(rawValue, "https://invite.local");
     const queryCandidate = firstNonEmpty(
       parsedUrl.searchParams.get("parentInviteCode"),
       parsedUrl.searchParams.get("parentId"),
@@ -104,25 +121,5 @@ export function normalizeInviteCodeCandidate(value: unknown): string {
 export function extractParentInviteCodeCandidateFromRequestData(data: Record<string, unknown> | undefined): string {
   if (!data || typeof data !== "object") return "";
 
-  return firstNonEmpty(
-    data.parentInviteCode,
-    data.parentId,
-    data["parent-id"],
-    data.parent_id,
-    data.parentCode,
-    data["parent-code"],
-    data.inviteCode,
-    data.invite_code,
-    data.code,
-    data.branchCode,
-    data.branch_code,
-    data.link,
-    data.url,
-    data["branch-link"],
-    data["branch_url"],
-    data["deep_link"],
-    data["deeplink"],
-    data["deeplink_path"],
-    data["deeplinkPath"]
-  );
+  return normalizeInviteCodeCandidate(data);
 }
