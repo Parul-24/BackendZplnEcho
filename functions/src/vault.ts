@@ -1698,7 +1698,7 @@ export async function calculateAndUpdateMiningRateForUser(userId: string | null,
       teamGrowthRewardSummary = await creditTeamGrowthRewards(
         userId,
         buildTeamGrowthRewardCountsFromDisplayCounts(displayCounts),
-        currentRank as MiningRanks
+        newMiningRank
       );
     } else {
       teamGrowthRewardSummary = await getPreviewTeamGrowthRewardSummary(
