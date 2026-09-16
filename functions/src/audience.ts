@@ -106,9 +106,10 @@ export async function UpdateParentChildConnections(userId: string, parentUid: st
 
     const userDb = await admin.database().ref("Users/" + userId).once('value');
 
-    //set parent of user
+    // Keep the legacy parentId alias synchronized with the canonical parentUid.
     let updateObject: { [key: string]: string } = {};
     updateObject[FieldParentUid] = parentUid;
+    updateObject.parentId = parentUid;
     await userDb.ref.update(updateObject);
 
     // Add user to parent without overwriting existing childrenIds values.
@@ -594,7 +595,7 @@ export async function checkIfParentExist(userId: string | null): Promise<boolean
         return false;
 
     const userDb = await admin.database().ref("Users/" + userId).once('value');
-    let doesUserExist = userDb.child(FieldParentUid).exists() ? true : false;
+    let doesUserExist = userDb.child(FieldParentUid).exists() || userDb.child("parentId").exists();
 
     if (!doesUserExist) {
         const audienceDb = await admin.database().ref(Audicence_DB + "/" + "00000-00000" + "/" + userId).once('value');
