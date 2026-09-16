@@ -2,11 +2,10 @@ import * as admin from "firebase-admin";
 
 export const STAGING = false;
 
-
-const serviceAccount = STAGING? require("../service-account-zpln-staging.json"): require('../service-account-zpln-production.json');
+const credential = admin.credential.applicationDefault();
 
 const productionOptions = {
-    credential: admin.credential.cert(serviceAccount),
+    credential,
     storageBucket: 'zpln-3be94.appspot.com',
     databaseURL: 'https://zpln-3be94.firebaseio.com/',
     webAPIKey: 'AIzaSyCWgV15Z9qdKkwgrUFyC1cW89VlhWm8_Sw'
@@ -15,7 +14,7 @@ const productionOptions = {
 
 
 const stagingOptions = {
-    credential: admin.credential.cert(serviceAccount),
+    credential,
     storageBucket: 'zplndev.firebasestorage.app',
     databaseURL: 'https://zplndev-default-rtdb.firebaseio.com/',
     webAPIKey: 'AIzaSyAjsCx31wpis5YdnTxFOHUa8YKUR7M7XQ4'
