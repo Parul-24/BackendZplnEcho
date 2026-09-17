@@ -701,6 +701,21 @@ export const GetUserIdFromUsernameAndNumber = functions.runWith({ memory: "512MB
   // });
 });
 
+export const GetUserIdFromUsername = functions.runWith({ memory: "512MB" }).https.onRequest(async (request, response) => {
+  const userName = String(request.query.userName || "").trim();
+  if (!userName) {
+    response.status(400).send({ errorno: 5001, message: "Error missing userName", userId: null });
+    return;
+  }
+
+  const result: any = await utils.checkUserName(userName, null);
+  if (result.userId) {
+    response.send({ errorno: -1, message: "Found", userId: result.userId });
+  } else {
+    response.send({ errorno: 5002, message: "Not Present", userId: null });
+  }
+});
+
 export const GetInviteCode = functions.runWith({ memory: "512MB" }).https.onRequest(async (request, response) => {
   const userId = String(request.query.userId);
 
