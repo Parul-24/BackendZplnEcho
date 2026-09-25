@@ -614,6 +614,21 @@ export async function getPlayRankNameForUser(userId: string | null): Promise<str
 // }
 
 
+// Counts direct ("actual") referral children only, ignoring spill-tree placements.
+export async function countActualDirectChildren(userId: string | null): Promise<number> {
+  if (!userId) return 0;
+
+  const childrenSnap = await admin.database().ref(`${tournament.Users_DB}/${userId}/childrenIds`).once("value");
+  if (!childrenSnap.exists()) return 0;
+
+  const raw = childrenSnap.val();
+  const ids = Array.isArray(raw)
+    ? raw.filter(Boolean).map(String)
+    : (raw && typeof raw === "object" ? Object.keys(raw) : []);
+
+  return new Set(ids.map((id) => String(id || "").trim()).filter((id) => id.length > 0)).size;
+}
+
 export async function countSector1ChildrenByMiningRank(userId: string | null): Promise<{
   totalMembers: number;
   DefaultCount: number;
@@ -1800,8 +1815,9 @@ export async function calculateAllUsersTeamGrowthRewardsForBatch(
     const batchResults = await Promise.all(
       batch.map(async (userId) => {
         try {
-          const counts = await countSector1ChildrenByMiningRank(userId);
-          const qualified = counts.totalMembers >= 5;
+          // Qualification requires 5 direct (actual) referrals, not spill-tree placements.
+          const directChildrenCount = await countActualDirectChildren(userId);
+          const qualified = directChildrenCount >= 5;
 
           const result = await calculateAndUpdateMiningRateForUser(userId, qualified && applyCredits);
           const maka = (result?.agentMakaReward || 0) + (result?.builderMakaReward || 0) + (result?.specialistMakaReward || 0) + (result?.architectMakaReward || 0);

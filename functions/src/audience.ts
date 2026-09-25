@@ -6,9 +6,8 @@ import * as controlled_invites from "./controlled_invites"
 import * as utils from "./utils";
 import * as userUtils from "./user_utils";
 import { WaveDictionaryClass, WaveSector } from "./wave_util_classes";
-import { generateInviteCode, getCodeFromInviteLink } from "./utils";
+import { getCodeFromInviteLink } from "./utils";
 import { DataSnapshot } from "firebase-admin/database";
-import { createDynamicLinkForInviteCode } from "./dynamic_links_handler";
 import { STAGING } from "./environments";
 import * as vault from "./vault";
 //import * as vault from './vault';
@@ -62,7 +61,7 @@ export async function setParentId(userId: string | null, parentInviteCode: strin
     let parentUid = await getParentUidFromParentCode(parentInviteCode);
 
     //if invite code doesnt exist, return
-    if (parentUid === null) {
+    if (!parentUid) {
         console.log("UpdateParentId - setParentId - " + "parentUid is null.");
         return false;
     }
@@ -162,22 +161,32 @@ export async function createInviteCodeIfDoesntAlreadyExists(userId: string): Pro
     }
 
     const userDb = await admin.database().ref("Users/" + userId).once('value');
+    if (!userDb.exists()) return;
 
-    let inviteCode = null;
-
-    if (!userDb.child(FieldInviteCode).exists()) {
-        inviteCode = await generateUniqueInviteCode(userId, generateInviteCode);
-        await addInviteCodeToUserDb(userDb, inviteCode);
-        await addInviteCodeToInviteCodeDb(inviteCode, userId);
+    const existingCode = String(userDb.child(FieldInviteCode).val() || "");
+    const existingLink = String(userDb.child(FieldInviteLink).val() || "");
+    if (existingCode && existingLink === utils.generateEchoProInviteLink(existingCode)) {
+        const mappedUser = await admin.database().ref(`EchoProInviteCodes/${existingCode}`).once("value");
+        if (mappedUser.val() === userId) return;
     }
 
-    if (!userDb.child(FieldInviteLink).exists()) {
-        if (inviteCode == null)
-            inviteCode = userDb.child(FieldInviteCode).val();
-        const userName = String(userDb.child("userName").val() || "").trim();
-        const inviteLink = await createDynamicLinkForInviteCode(inviteCode, userName);
-        await addInviteLinkToUserDb(userDb, inviteLink);
+    let inviteCode = String(userDb.child(`${userUtils.FieldEcho}/${userUtils.FieldEchoProInviteCode}`).val() || "");
+    if (inviteCode) {
+        const echoCodeSnap = await admin.database().ref(`EchoProInviteCodes/${inviteCode}`).once("value");
+        if (echoCodeSnap.val() !== userId) inviteCode = "";
     }
+
+    if (!inviteCode) {
+        const firstName = String(userDb.child("firstName").val() || "");
+        const lastName = String(userDb.child("lastName").val() || "");
+        inviteCode = await generateUniqueInviteCode(userId, () => utils.generateEchoProInviteCode(firstName, lastName));
+        await admin.database().ref(`EchoProInviteCodes/${inviteCode}`).set(userId);
+    }
+
+    await userDb.ref.update({
+        [FieldInviteCode]: inviteCode,
+        [FieldInviteLink]: utils.generateEchoProInviteLink(inviteCode)
+    });
 }
 
 export async function resetAndRegenerateFreeInviteForUser(userId: string): Promise<{
@@ -210,23 +219,6 @@ export async function resetAndRegenerateFreeInviteForUser(userId: string): Promi
 
     const oldInviteCode = asStringOrEmpty(snapshot.child(FieldInviteCode).val());
     const oldInviteLink = asStringOrEmpty(snapshot.child(FieldInviteLink).val());
-    const oldShortLinkCode = oldInviteLink ? getCodeFromInviteLink(oldInviteLink) : "";
-
-    if (oldInviteCode) {
-        await removeInviteCodeFromInviteCodeDb(oldInviteCode);
-        await admin.database().ref(`${FieldInviteCodeRegistryDB}/${oldInviteCode}`).remove();
-    }
-
-    if (oldShortLinkCode) {
-        await removeShortLinkInviteCodeFromShortLinkInviteCodeDb(oldShortLinkCode);
-    }
-
-    await userRef.update({
-        [FieldInviteCode]: null,
-        [FieldInviteLink]: null,
-        [controlled_invites.FieldInvitesLeft]: 0,
-        [userUtils.FieldIsEchoPro]: snapshot.child(userUtils.FieldIsEchoPro).val() === true
-    });
 
     await createInviteCodeIfDoesntAlreadyExists(userId);
 
@@ -352,25 +344,15 @@ export function isParentIdAndUserIdSame(userId: string, parentUid: string): bool
 }
 
 export async function getParentUidFromParentCode(parentInviteCode: string): Promise<string> {
-    var inviteCodesDbRef = await admin.database().ref(FieldInviteCodesDB);
-    var inviteCodeSnapshot = (await inviteCodesDbRef.child(parentInviteCode).once('value'));
-    if (!inviteCodeSnapshot.exists()) {
-        console.log("getParentUidFromParentCode - long code doenst exist");
-        inviteCodesDbRef = await admin.database().ref(FieldShortlinkCodesDB);
-        inviteCodeSnapshot = (await inviteCodesDbRef.child(parentInviteCode).once('value'));
+    if (parentInviteCode === RootUserInviteLink || parentInviteCode === utils.ECHO_PRO_CORPORATE_INVITE_CODE)
+        return RootUserId;
+
+    for (const path of [`EchoProInviteCodes/${parentInviteCode}`, `${FieldInviteCodesDB}/${parentInviteCode}`, `${FieldShortlinkCodesDB}/${parentInviteCode}`]) {
+        const snapshot = await admin.database().ref(path).once('value');
+        if (snapshot.exists()) return String(snapshot.val());
     }
 
-    if (!inviteCodeSnapshot.exists()) {
-        console.log("getParentUidFromParentCode - short code doenst exist");
-    }
-
-    let parentUid = null;
-    if (parentInviteCode === RootUserInviteLink)
-        parentUid = RootUserId;
-    else
-        parentUid = inviteCodeSnapshot.val();
-
-    return parentUid;
+    return "";
 }
 
 export async function getInviteCodeFromShortlinkInviteCode(shortLinkInviteCode: string): Promise<string> {
@@ -1024,61 +1006,12 @@ export async function getLevel1PlayersDataForUser(userId: string, pageNumber: nu
 // }
 
 
-export async function createEchoProInviteCodeIfDoesntAlreadyExists(
-  userId: string,
-  firstName: string = "",
-  lastName: string = ""
-): Promise<void> {
-  const userRef = admin.database().ref(`${tournament.Users_DB}/${userId}`);
-  const snapshot = await userRef.once("value");
-
-  if (!snapshot.exists()) return;
-
-  const isEchoPro = snapshot.child(userUtils.FieldIsEchoPro).val() === true;
-  if (!isEchoPro) return;
-
-  const echoNode = snapshot.child(userUtils.FieldEcho);
-
-  if (!echoNode.child(userUtils.FieldEchoProInviteCode).exists()) {
-
-    // get firstName/lastName from DB if not passed
-    const fn = firstName || String(snapshot.child("firstName").val() || "X");
-    const ln = lastName || String(snapshot.child("lastName").val() || "X");
-
-        // generate unique invite code with collision check across free, echo, and short-link namespaces
-        const echoProInviteCode = await generateUniqueInviteCode(userId, () => utils.generateEchoProInviteCode(fn, ln));
-
-    const echoProInviteLink = utils.generateEchoProInviteLink(echoProInviteCode);
-
-    // Save to user Echo node
-    await userRef.child(`${userUtils.FieldEcho}/${userUtils.FieldEchoProInviteCode}`).set(echoProInviteCode);
-    await userRef.child(`${userUtils.FieldEcho}/${userUtils.FieldEchoProInviteLink}`).set(echoProInviteLink);
-
-    // Save global lookup: EchoProInviteCodes/{code} = userId
-    await admin.database().ref(`EchoProInviteCodes/${echoProInviteCode}`).set(userId);
-  }
-
-  // Initialize counter if doesn't exist
-  if (!echoNode.child(userUtils.FieldEchoParentInviteCounter).exists()) {
-    await userRef.child(`${userUtils.FieldEcho}/${userUtils.FieldEchoParentInviteCounter}`).set(0);
-  }
+export async function createEchoProInviteCodeIfDoesntAlreadyExists(userId: string): Promise<void> {
+    await createInviteCodeIfDoesntAlreadyExists(userId);
 }
 
 export async function getEchoProParentUidFromInviteCode(inviteCode: string): Promise<string | null> {
-  if (!inviteCode) return null;
-
-  // Check corporate invite code
-  if (inviteCode === utils.ECHO_PRO_CORPORATE_INVITE_CODE) {
-    return RootUserId; // corporate/root parent
-  }
-
-  // Check EchoProInviteCodes table
-  const echoProSnapshot = await admin.database()
-    .ref(`EchoProInviteCodes/${inviteCode}`)
-    .once("value");
-  if (echoProSnapshot.exists()) return String(echoProSnapshot.val());
-
-  return null;
+    return (await getParentUidFromParentCode(inviteCode)) || null;
 }
 
 
@@ -1118,7 +1051,7 @@ export async function getEchoProReferrerInfoFromCode(inviteCode: string): Promis
     };
   }
 
-  const parentUid = await getEchoProParentUidFromInviteCode(inviteCode);
+    const parentUid = await getParentUidFromParentCode(inviteCode);
   if (!parentUid) return null;
 
   // NEW: if resolved to root, return corporate name

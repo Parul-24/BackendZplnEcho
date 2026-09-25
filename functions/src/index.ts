@@ -133,8 +133,15 @@ export const CreateEchoProUserAPI = functions.runWith({ memory: "512MB" }).https
     return;
   }
 
+  const existingUser = await admin.database().ref(`${tournament.Users_DB}/${userId}`).once("value");
+  if (existingUser.exists()) {
+    response.status(409).json({ error: "User already exists", nextAction: "LOGIN" });
+    return;
+  }
+
   console.log("CreateUser ---- " + userId + " " + userName + " " + phone + " " + parentId + " " + savedAvatarURL)
   const snapshot = await utils.CreateUserFromJson(userId, userName, phone, parentId, savedAvatarURL);
+  await snapshot.ref.child("joinFromEcho").set(snapshot.child("joinFromEcho").val() === true);
 
   // Keep parent -> child mapping synced at registration time.
   await audience.addChildToParentChildrenIds(parentId, userId, tournament.Users_DB);
@@ -904,6 +911,9 @@ function isExpectedInviteLinkFormat(inviteLink: string): boolean {
   }
 
   if (parsed.protocol !== "https:") return false;
+  if (parsed.hostname === new URL(utils.ECHO_PRO_BASE_URL).hostname) {
+    return !parsed.search && !parsed.hash && /^\/[A-Za-z0-9]{8}$/.test(parsed.pathname);
+  }
   if (parsed.hostname !== "t5sgz.app.link") return false;
   if ((parsed.search || "").length > 0) return false;
 
@@ -939,6 +949,9 @@ export const NormalizeFreeUserAPI = functions.runWith({ memory: "512MB" }).https
     const snapshot = await userRef.once("value");
   const isNewUser = !snapshot.exists();
     const current = snapshot.val() || {};
+    const legacyEchoUser = current.joinFromEcho === undefined && snapshot.exists()
+      ? await admin.database().ref(`EchoUsers/${userId}`).once("value")
+      : null;
 
     const email = firstNonEmpty(data.email, current.email);
     const firstName = firstNonEmpty(data.firstName, current.firstName);
@@ -971,7 +984,8 @@ export const NormalizeFreeUserAPI = functions.runWith({ memory: "512MB" }).https
       parentUid,
       parentId,
       createdAt,
-      isEchoPro: false,
+      isEchoPro: current.isEchoPro === true,
+      joinFromEcho: current.joinFromEcho === true || (legacyEchoUser !== null && legacyEchoUser.exists()),
       level: 1,
       levelName: "Player",
       invitesLeft: 0
@@ -1024,6 +1038,7 @@ export const NormalizeFreeUserAPI = functions.runWith({ memory: "512MB" }).https
         email: normalized.email || "",
         firstName: normalized.firstName || "",
         isEchoPro: Boolean(normalized.isEchoPro),
+        joinFromEcho: Boolean(normalized.joinFromEcho),
         lastName: normalized.lastName || "",
         parentInviteCode: normalized.parentInviteCode || "",
         parentUid: normalized.parentUid || "",
@@ -1184,17 +1199,6 @@ export const RegenerateInvalidFreeInviteLinksAPI = functions.runWith({ timeoutSe
         let remainingIssue = reason;
 
         for (let attempt = 0; attempt < 3; attempt++) {
-          if (oldInviteLink && !oldInviteLink.includes("?") && oldInviteLink.toLowerCase() !== "error") {
-            const oldShortCode = getCodeFromInviteLink(oldInviteLink);
-            if (oldShortCode && !oldShortCode.includes("=") && !oldShortCode.includes("?")) {
-              await audience.removeShortLinkInviteCodeFromShortLinkInviteCodeDb(oldShortCode).catch(() => undefined);
-            }
-          }
-
-          await admin.database().ref(`${tournament.Users_DB}/${userId}`).update({
-            [audience.FieldInviteLink]: null
-          });
-
           await audience.createInviteCodeIfDoesntAlreadyExists(userId);
 
           refreshed = await admin.database().ref(`${tournament.Users_DB}/${userId}`).once("value");
@@ -2848,6 +2852,7 @@ export const GetMiningData = functions.runWith({ memory: "512MB" }).https.onRequ
     const { children: actualChildren } = await getActualChildrenDetails(userId);
     const actualChildrenCount = actualChildren.length;
     const { childIds: miningChildrenIds } = await getMiningChildrenDetails(userId);
+    // Qualification requires 5 direct (actual) referrals, not spill-tree placements.
     const isQualified = actualChildrenCount >= 5;
 
     // Qualified users persist rank/mining/reward updates to vault.
@@ -4756,22 +4761,18 @@ export const GetEchoProInviteCode = functions.runWith({ memory: "512MB" }).https
     return;
   }
 
-  // Check if user is Echo Pro
   const userSnap = await admin.database().ref(`${tournament.Users_DB}/${userId}`).once("value");
-  if (!userSnap.exists() || userSnap.child(userUtils.FieldIsEchoPro).val() !== true) {
-    response.status(404).json({ error: "User is not Echo Pro" });
+  if (!userSnap.exists()) {
+    response.status(404).json({ error: "User not found" });
     return;
   }
 
-  await audience.createEchoProInviteCodeIfDoesntAlreadyExists(userId);
+  await audience.createInviteCodeIfDoesntAlreadyExists(userId);
 
-  const echoProCodeSnap = await admin.database()
-    .ref(`${tournament.Users_DB}/${userId}/${userUtils.FieldEcho}/${userUtils.FieldEchoProInviteCode}`)
-    .once("value");
+  const echoProCodeSnap = await userSnap.ref.child(audience.FieldInviteCode).once("value");
 
   if (echoProCodeSnap.exists()) {
-    const echoProInviteCode = getCodeFromInviteLink(echoProCodeSnap.val());
-    response.status(200).send(echoProInviteCode);
+    response.status(200).send(echoProCodeSnap.val());
   } else {
     response.status(404).json({ error: "Echo Pro invite code not found" });
   }
@@ -4785,18 +4786,15 @@ export const GetEchoProInviteLink = functions.runWith({ memory: "512MB" }).https
     return;
   }
 
-  // Check if user is Echo Pro
   const userSnap = await admin.database().ref(`${tournament.Users_DB}/${userId}`).once("value");
-  if (!userSnap.exists() || userSnap.child(userUtils.FieldIsEchoPro).val() !== true) {
-    response.status(404).json({ error: "User is not Echo Pro" });
+  if (!userSnap.exists()) {
+    response.status(404).json({ error: "User not found" });
     return;
   }
 
-  await audience.createEchoProInviteCodeIfDoesntAlreadyExists(userId);
+  await audience.createInviteCodeIfDoesntAlreadyExists(userId);
 
-  const echoProLinkSnap = await admin.database()
-    .ref(`${tournament.Users_DB}/${userId}/${userUtils.FieldEcho}/${userUtils.FieldEchoProInviteLink}`)
-    .once("value");
+  const echoProLinkSnap = await userSnap.ref.child(audience.FieldInviteLink).once("value");
 
   if (echoProLinkSnap.exists()) {
     response.status(200).send(echoProLinkSnap.val());
@@ -4881,38 +4879,37 @@ export const RegisterEchoProUserAPI = functions.runWith({ memory: "512MB" }).htt
 
       const userId = String(q.userId || "").trim();
       const phone = String(q.phone || "").trim();
+      const idToken = String(q.idToken || "").trim();
       const firstName = String(q.firstName || "").trim();
       const lastName = String(q.lastName || "").trim();
       const email = String(q.email || "").trim();
-      const parentInviteCode = String(q.parentInviteCode || "").trim();
+      const parentInviteCode = normalizeInviteCodeCandidate(q.parentInviteCode) || utils.ECHO_PRO_CORPORATE_INVITE_CODE;
       const savedAvatarURL = String(q.savedAvatarURL || "").trim();
       const userName = `${firstName} ${lastName}`.trim();
 
       if (!userId) return response.status(400).json({ error: "Missing userId" });
       if (!phone) return response.status(400).json({ error: "Missing phone" });
+      if (!idToken) return response.status(400).json({ error: "Missing idToken" });
       if (!firstName) return response.status(400).json({ error: "Missing firstName" });
       if (!lastName) return response.status(400).json({ error: "Missing lastName" });
       if (!email) return response.status(400).json({ error: "Missing email" });
-      if (!parentInviteCode) return response.status(400).json({ error: "Missing parentInviteCode" });
 
+      let authUser;
       try {
-        const authUser = await admin.auth().getUserByPhoneNumber(phone);
-        if (authUser.uid && authUser.uid !== userId) {
-          return response.status(409).json({
-            error: "Phone already registered. Please login.",
-            nextAction: "LOGIN"
-          });
-        }
+        const decoded = await admin.auth().verifyIdToken(idToken);
+        if (decoded.uid !== userId) return response.status(401).json({ error: "User/token mismatch" });
+        authUser = await admin.auth().getUser(decoded.uid);
       } catch {
-        // not found - safe to proceed
+        return response.status(401).json({ error: "Invalid or expired token" });
       }
+      if (authUser.phoneNumber !== phone) return response.status(401).json({ error: "Phone/token mismatch" });
 
       const existingUserSnap = await admin.database().ref(`${tournament.Users_DB}/${userId}`).once("value");
       if (existingUserSnap.exists()) {
-        return response.status(409).json({ error: "User already exists" });
+        return response.status(409).json({ error: "User already exists", nextAction: "LOGIN" });
       }
 
-      const parentUid = await audience.getEchoProParentUidFromInviteCode(parentInviteCode);
+      const parentUid = await audience.getParentUidFromParentCode(parentInviteCode);
       if (!parentUid) {
         return response.status(400).json({ error: "Invalid Echo Pro invite code" });
       }
@@ -4943,7 +4940,8 @@ await admin.database().ref(`${tournament.Users_DB}/${userId}`).update({
   parentUid,
   parentId: parentUid,
   parentInviteCode,
-  [userUtils.FieldIsEchoPro]: true,
+  joinFromEcho: true,
+  [userUtils.FieldIsEchoPro]: false,
   [`${userUtils.FieldEcho}/${userUtils.FieldEchoParentInviteCounter}`]: 0
 });
 
@@ -4958,9 +4956,8 @@ await admin.database().ref(`${tournament.Users_DB}/${userId}`).update({
       //   [`${userUtils.FieldEcho}/${userUtils.FieldEchoParentInviteCounter}`]: 0
       // });
 
-      // Also provision the regular game invite code/link for Echo Pro users.
+      // Use the same invite code and link in the website and app.
       await audience.createInviteCodeIfDoesntAlreadyExists(userId);
-      await audience.createEchoProInviteCodeIfDoesntAlreadyExists(userId, firstName, lastName);
 
       if (parentUid !== audience.RootUserId) {
         await audience.incrementEchoProInviteCounter(parentUid);
@@ -4973,53 +4970,18 @@ await admin.database().ref(`${tournament.Users_DB}/${userId}`).update({
       const gameInviteCode = String(userInviteSnap.child(audience.FieldInviteCode).val() || "");
       const gameInviteLink = String(userInviteSnap.child(audience.FieldInviteLink).val() || "");
 
-      const echoNodeSnap = await admin.database()
-        .ref(`${tournament.Users_DB}/${userId}/${userUtils.FieldEcho}`)
-        .once("value");
-
-      const echoInviteCode = String(echoNodeSnap.child(userUtils.FieldEchoProInviteCode).val() || "");
-      const echoInviteLink = String(echoNodeSnap.child(userUtils.FieldEchoProInviteLink).val() || "");
-
-      await admin.database().ref(`EchoUsers/${userId}`).set({
-        userId,
-        userName,
-        firstName,
-        lastName,
-        phone,
-        email,
-        parentUid,
-        parentInviteCode,
-        isEchoPro: true,
-        inviteCode: gameInviteCode,
-        inviteLink: gameInviteLink,
-        Echo: {
-          echoProInviteCode: echoInviteCode,
-          echoProInviteLink: echoInviteLink,
-          echoParentInviteCounter: 0
-        },
-        createdAt: Date.now()
-      });
-
-      const echoUserSnap = await admin.database().ref(`EchoUsers/${userId}`).once("value");
-
       // Keep parent -> child mapping in Users.
       await audience.addChildToParentChildrenIds(parentUid, userId, tournament.Users_DB);
       await audience.addUserToSpillTree(parentUid, userId);
 
-      // Keep parent -> child mapping in EchoUsers (best effort).
-      try {
-        const parentEchoSnap = await admin.database().ref(`EchoUsers/${parentUid}`).once("value");
-        if (parentEchoSnap.exists()) {
-          await audience.addChildToParentChildrenIds(parentUid, userId, "EchoUsers");
-        }
-      } catch (e) {
-        console.warn("RegisterEchoProUserAPI: EchoUsers parent link skipped", e);
-      }
-
       return response.status(200).json({
         success: true,
         userId,
-        data: echoUserSnap.exists() ? echoUserSnap.val() : null
+        isEchoPro: false,
+        joinFromEcho: true,
+        inviteCode: gameInviteCode,
+        inviteLink: gameInviteLink,
+        data: userInviteSnap.val()
       });
 
     } catch (err) {
@@ -5214,7 +5176,12 @@ export const LoginEchoProUserAPI = functions.runWith({ memory: "512MB" }).https.
       }
 
       // 1) Verify Firebase Auth token
-      const decoded = await admin.auth().verifyIdToken(idToken);
+      let decoded;
+      try {
+        decoded = await admin.auth().verifyIdToken(idToken);
+      } catch {
+        return response.status(401).json({ error: "Invalid or expired token" });
+      }
       const uid = decoded.uid;
 
       // 2) Validate phone belongs to same authenticated user
@@ -5225,33 +5192,38 @@ export const LoginEchoProUserAPI = functions.runWith({ memory: "512MB" }).https.
         return response.status(401).json({ error: "Phone/token mismatch" });
       }
 
-      // 3) Read Echo user profile
-      const echoSnap = await admin.database().ref(`EchoUsers/${uid}`).once("value");
+      // 3) Read the shared user profile
+      const userSnap = await admin.database().ref(`${tournament.Users_DB}/${uid}`).once("value");
 
-      if (!echoSnap.exists()) {
+      if (!userSnap.exists()) {
         return response.status(404).json({
-          error: "Echo user not found. Please register first."
+          error: "User not found. Please register first."
         });
       }
 
-      const echoUser = echoSnap.val() || {};
+      if (!userSnap.child("joinFromEcho").exists()) {
+        const legacyEchoSnap = await admin.database().ref(`EchoUsers/${uid}`).once("value");
+        await userSnap.ref.child("joinFromEcho").set(legacyEchoSnap.exists());
+      }
 
-      // 4) Update last login timestamps
-      await admin.database().ref().update({
-        [`EchoUsers/${uid}/lastLoginAt`]: Date.now(),
-        [`${tournament.Users_DB}/${uid}/lastLoginAt`]: Date.now()
-      });
+      await audience.createInviteCodeIfDoesntAlreadyExists(uid);
+      const user = (await userSnap.ref.once("value")).val() || {};
+
+      // 4) Update last login timestamp
+      await userSnap.ref.child("lastLoginAt").set(Date.now());
 
       return response.status(200).json({
         success: true,
         userId: uid,
         phone: authPhone,
-        data: echoUser
+        isEchoPro: user.isEchoPro === true,
+        joinFromEcho: user.joinFromEcho === true,
+        data: user
       });
 
     } catch (err) {
       console.error("LoginEchoProUserAPI error:", err);
-      return response.status(401).json({ error: "Invalid or expired token" });
+      return response.status(500).json({ error: "Internal Server Error" });
     }
   });
 });
@@ -7106,7 +7078,8 @@ export const SyncEchoUsersToUsersAPI = functions.runWith({
             firstName: user.firstName,
             lastName: user.lastName,
             email: user.email,
-            [userUtils.FieldIsEchoPro]: true
+            joinFromEcho: true,
+            [userUtils.FieldIsEchoPro]: false
           };
 
           const echoUserSnap = await admin.database().ref(`EchoUsers/${user.userId}`).once("value");
