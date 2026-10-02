@@ -188,25 +188,44 @@ export async function setWeeklyResetState(stateCode: number) {
 
 export async function minutelyJob(context: functions.EventContext | null) {
     console.log("minutelyJob Called at " + new Date().toString());
-    controlled_invites.eventCompletionCheck();
+    await controlled_invites.eventCompletionCheck();
 }
 
 // Runs 4 times per day (every 6 hours) to refresh stale mining-rank cache values.
 export const dailyRefreshMiningRanks = functions
-  .runWith({ timeoutSeconds: 540, memory: "1GB" })
+  .runWith({ timeoutSeconds: 540, memory: "512MB" })
   .pubsub.schedule("0 */6 * * *")
   .timeZone("America/Los_Angeles")
   .onRun(async (context) => {
     console.log("dailyRefreshMiningRanks started", new Date().toISOString());
     try {
-      const usersSnap = await admin.database().ref(Users_DB).once("value");
-      if (!usersSnap.exists()) {
+      // Paginate user keys instead of loading all of /Users into memory at once.
+      const userIds: string[] = [];
+      const keyPageSize = 200;
+      let lastKey: string | null = null;
+      while (true) {
+        const keysQuery: admin.database.Query = lastKey
+          ? admin.database().ref(Users_DB).orderByKey().startAfter(lastKey).limitToFirst(keyPageSize)
+          : admin.database().ref(Users_DB).orderByKey().limitToFirst(keyPageSize);
+        const keysSnap: admin.database.DataSnapshot = await keysQuery.once("value");
+        if (!keysSnap.exists()) {
+          break;
+        }
+        const pageKeys: string[] = Object.keys(keysSnap.val() as Record<string, unknown>);
+        if (pageKeys.length === 0) {
+          break;
+        }
+        userIds.push(...pageKeys);
+        lastKey = pageKeys[pageKeys.length - 1];
+        if (pageKeys.length < keyPageSize) {
+          break;
+        }
+      }
+      if (userIds.length === 0) {
         console.log("dailyRefreshMiningRanks: no users found");
         return null;
       }
 
-      const usersVal = usersSnap.val() as Record<string, unknown> | null;
-      const userIds = Object.keys(usersVal || {});
       const batchSize = 50;
       const delayMs = 200;
 
@@ -236,7 +255,7 @@ export const dailyRefreshMiningRanks = functions
   });
 
 export const dailyRefreshMiningRewards = functions
-  .runWith({ timeoutSeconds: 540, memory: "1GB" })
+  .runWith({ timeoutSeconds: 540, memory: "512MB" })
   .pubsub.schedule("0 */6 * * *")
   .timeZone("America/Los_Angeles")
   .onRun(async (context) => {

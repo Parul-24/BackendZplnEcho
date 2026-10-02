@@ -68,8 +68,8 @@ export const scheduledWeeklyRecap = functions.runWith({ timeoutSeconds: 300, mem
   .timeZone("America/Los_Angeles")//"America/Los_Angeles")//Etc/UTC
   .onRun(schedule.weeklyRecap);
 
-const MINUTELY_CRON_EXPRESSION = "* * * * *";
-export const minutelyJob = functions.runWith({ timeoutSeconds: 300, memory: "1GB" }).pubsub.schedule(MINUTELY_CRON_EXPRESSION)
+const MINUTELY_CRON_EXPRESSION = "*/5 * * * *"; // every 5 minutes (was every minute) to cut scheduler invocation costs
+export const minutelyJob = functions.runWith({ timeoutSeconds: 300, memory: "512MB" }).pubsub.schedule(MINUTELY_CRON_EXPRESSION)
   .timeZone("America/Los_Angeles")
   .onRun(schedule.minutelyJob);
 
@@ -78,7 +78,7 @@ export const dailyRefreshMiningRanks = schedule.dailyRefreshMiningRanks;
 //#endregion
 
 //#region Registration
-export const OnUserC = functions.runWith({ memory: "512MB" }).database.ref('/Users/{userID}').onCreate(async (snapshot, context) => {
+export const OnUserC = functions.runWith({ memory: "256MB" }).database.ref('/Users/{userID}').onCreate(async (snapshot, context) => {
   //currentUserID = String(snapshot.key);
   //currentParents.push(currentUserID);
   console.log("Created user:" + snapshot.key + " proceeding to Extra Conf with RegistrationLink " + snapshot.child("registrationLink").exists())
@@ -95,7 +95,7 @@ export const OnUserC = functions.runWith({ memory: "512MB" }).database.ref('/Use
   console.log('user created ' + snapshot.key);
 });
 
-export const CreateEchoProUserAPI = functions.runWith({ memory: "512MB" }).https.onRequest(async (request, response) => {
+export const CreateEchoProUserAPI = functions.runWith({ memory: "256MB" }).https.onRequest(async (request, response) => {
   let userId: string | null = String(request.query.userId);
   if (request.query.userId === undefined || userId === null) {
     response.send("Error: no UserId");
@@ -151,7 +151,7 @@ export const CreateEchoProUserAPI = functions.runWith({ memory: "512MB" }).https
   return;
 });
 
-export const SetUsernameOfUser = functions.runWith({ memory: "512MB" }).https.onRequest(async (request, response) => {
+export const SetUsernameOfUser = functions.runWith({ memory: "256MB" }).https.onRequest(async (request, response) => {
   let userId: string | null = String(request.query.userId);
   if (request.query.userId === undefined || userId === null) {
     response.send("Error: no UserId");
@@ -170,7 +170,7 @@ export const SetUsernameOfUser = functions.runWith({ memory: "512MB" }).https.on
   return;
 });
 
-export const GetUser = functions.runWith({ memory: "512MB" }).https.onRequest(async (request, response) => {
+export const GetUser = functions.runWith({ memory: "256MB" }).https.onRequest(async (request, response) => {
   let userId: string | null = String(request.query.userId);
   if (request.query.userId === undefined || userId === null) {
     response.send("Error: no UserId");
@@ -213,7 +213,7 @@ export const GetUser = functions.runWith({ memory: "512MB" }).https.onRequest(as
   return;
 });
 
-export const FinalRegistrationStep = functions.runWith({ memory: "512MB" }).https.onRequest(async (request, response) => {
+export const FinalRegistrationStep = functions.runWith({ memory: "256MB" }).https.onRequest(async (request, response) => {
   let userId: string | null = String(request.query.userId);
   if (request.query.userId === undefined) {
     response.send("Error: no UserId");
@@ -336,7 +336,7 @@ async function diagnoseUpdateParentIdFailure(userId: string, parentInviteCode: s
   };
 }
 
-export const UpdateParentId = functions.runWith({ memory: "512MB" }).https.onRequest(async (request, response) => {
+export const UpdateParentId = functions.runWith({ memory: "256MB" }).https.onRequest(async (request, response) => {
   try {
     const data = getRequestData(request);
     const userId = firstNonEmpty(data.userId, data.uid);
@@ -427,7 +427,7 @@ export const UpdateParentId = functions.runWith({ memory: "512MB" }).https.onReq
   }
 });
 
-export const ChangeUserParentAPI = functions.runWith({ memory: "512MB" }).https.onRequest(async (request, response) => {
+export const ChangeUserParentAPI = functions.runWith({ memory: "256MB" }).https.onRequest(async (request, response) => {
   try {
     const q: any = request.method === "GET" ? request.query : request.body;
     const userId = String(q.userId || q.uid || "").trim();
@@ -462,7 +462,7 @@ export const ChangeUserParentAPI = functions.runWith({ memory: "512MB" }).https.
   }
 });
 
-export const CheckIfParentExist = functions.runWith({ memory: "512MB" }).https.onRequest(async (request, response) => {
+export const CheckIfParentExist = functions.runWith({ memory: "256MB" }).https.onRequest(async (request, response) => {
 
   if (request.query.userId === undefined) {
     response.send("Missing UserId");
@@ -475,7 +475,7 @@ export const CheckIfParentExist = functions.runWith({ memory: "512MB" }).https.o
 });
 
 
-export const CheckUserId = functions.runWith({ memory: "512MB" }).https.onRequest(async (request, response) => {
+export const CheckUserId = functions.runWith({ memory: "256MB" }).https.onRequest(async (request, response) => {
   const userId = String(request.query.userId);
   if (request.query.userId === undefined) {
     response.send({
@@ -581,7 +581,7 @@ export const CheckIfUserExistForPhoneNumber = functions.runWith({ memory: "512MB
   response.send(userAlreadyExists);
 });
 
-export const CheckUserPin = functions.runWith({ memory: "512MB" }).https.onRequest(async (request, response) => {
+export const CheckUserPin = functions.runWith({ memory: "256MB" }).https.onRequest(async (request, response) => {
   const userName = String(request.query.userName);
   if (request.query.userName === undefined) {
     response.send({
@@ -609,7 +609,7 @@ export const CheckUserPin = functions.runWith({ memory: "512MB" }).https.onReque
 
 });
 
-export const CreateUserPin = functions.runWith({ memory: "512MB" }).https.onRequest(async (request, response) => {
+export const CreateUserPin = functions.runWith({ memory: "256MB" }).https.onRequest(async (request, response) => {
   const userId = String(request.query.userId);
   if (request.query.userId === undefined) {
     response.send({
@@ -636,7 +636,7 @@ export const CreateUserPin = functions.runWith({ memory: "512MB" }).https.onRequ
 
 });
 
-export const IsUserAuthenticated = functions.runWith({ memory: "512MB" }).https.onRequest(async (request, response) => {
+export const IsUserAuthenticated = functions.runWith({ memory: "256MB" }).https.onRequest(async (request, response) => {
   if (request.query.userId === undefined) {
     response.send("Missing UserId.");
     return;
@@ -650,7 +650,7 @@ export const IsUserAuthenticated = functions.runWith({ memory: "512MB" }).https.
   }
 });
 
-export const GetUserIdFromUsernameAndNumber = functions.runWith({ memory: "512MB" }).https.onRequest(async (request, response) => {
+export const GetUserIdFromUsernameAndNumber = functions.runWith({ memory: "256MB" }).https.onRequest(async (request, response) => {
 
   if (request.query.username === undefined) {
     response.send("Missing Username.");
@@ -708,7 +708,7 @@ export const GetUserIdFromUsernameAndNumber = functions.runWith({ memory: "512MB
   // });
 });
 
-export const GetUserIdFromUsername = functions.runWith({ memory: "512MB" }).https.onRequest(async (request, response) => {
+export const GetUserIdFromUsername = functions.runWith({ memory: "256MB" }).https.onRequest(async (request, response) => {
   const userName = String(request.query.userName || "").trim();
   if (!userName) {
     response.status(400).send({ errorno: 5001, message: "Error missing userName", userId: null });
@@ -723,7 +723,7 @@ export const GetUserIdFromUsername = functions.runWith({ memory: "512MB" }).http
   }
 });
 
-export const GetInviteCode = functions.runWith({ memory: "512MB" }).https.onRequest(async (request, response) => {
+export const GetInviteCode = functions.runWith({ memory: "256MB" }).https.onRequest(async (request, response) => {
   const userId = String(request.query.userId);
 
   if (request.query.userId === undefined || userId === null || userId.length === 0) {
@@ -745,7 +745,7 @@ export const GetInviteCode = functions.runWith({ memory: "512MB" }).https.onRequ
   }
 });
 
-export const GetInviteLink = functions.runWith({ memory: "512MB" }).https.onRequest(async (request, response) => {
+export const GetInviteLink = functions.runWith({ memory: "256MB" }).https.onRequest(async (request, response) => {
   const userId = String(request.query.userId);
 
   if (request.query.userId === undefined || userId === null || userId.length === 0) {
@@ -762,7 +762,7 @@ export const GetInviteLink = functions.runWith({ memory: "512MB" }).https.onRequ
     response.status(404).send("Invite code not found.");//Invite code not found.
 });
 
-export const GetUserByInviteCodeAPI = functions.runWith({ memory: "512MB" }).https.onRequest(async (request, response) => {
+export const GetUserByInviteCodeAPI = functions.runWith({ memory: "256MB" }).https.onRequest(async (request, response) => {
   try {
     const data = getRequestData(request);
     const incomingCode = extractParentInviteCodeCandidateFromRequestData(data);
@@ -935,7 +935,7 @@ function findInvalidInviteLinkReason(userNode: any): string {
   return "";
 }
 
-export const NormalizeFreeUserAPI = functions.runWith({ memory: "512MB" }).https.onRequest(async (request, response) => {
+export const NormalizeFreeUserAPI = functions.runWith({ memory: "256MB" }).https.onRequest(async (request, response) => {
   try {
     const data = getRequestData(request);
     const userId = firstNonEmpty(data.userId, data.uid);
@@ -1335,7 +1335,7 @@ export const RefreshAllMiningRanksAPI = functions.runWith({ timeoutSeconds: 540,
   }
 });
 
-export const DeleteUserAccountByNumber = functions.runWith({ memory: "512MB" }).https.onRequest(async (request, response) => {
+export const DeleteUserAccountByNumber = functions.runWith({ memory: "256MB" }).https.onRequest(async (request, response) => {
 
   if (request.query.phone === undefined) {
     response.send("Missing Phone");
@@ -1353,7 +1353,7 @@ export const DeleteUserAccountByNumber = functions.runWith({ memory: "512MB" }).
   response.send('Removed user: ' + userId);
 });
 
-export const DeleteUserAccount = functions.runWith({ memory: "512MB" }).https.onRequest(async (request, response) => {
+export const DeleteUserAccount = functions.runWith({ memory: "256MB" }).https.onRequest(async (request, response) => {
 
   if (request.query.userId === undefined) {
     response.send("Missing UserId");
@@ -1373,7 +1373,7 @@ export const DeleteUserAccount = functions.runWith({ memory: "512MB" }).https.on
 
 //#region Events & Score
 
-export const JoinTournament = functions.runWith({ memory: "512MB" }).https.onRequest(async (request, response) => {
+export const JoinTournament = functions.runWith({ memory: "256MB" }).https.onRequest(async (request, response) => {
   const tournamentId = String(request.query.eventId);
   const userId = String(request.query.userId);
 
@@ -1419,7 +1419,7 @@ export const JoinTournament = functions.runWith({ memory: "512MB" }).https.onReq
   }).catch();
 });
 
-export const JoinExhibitionTournament = functions.runWith({ memory: "512MB" }).https.onRequest(async (request, response) => {
+export const JoinExhibitionTournament = functions.runWith({ memory: "256MB" }).https.onRequest(async (request, response) => {
   const tournamentId = String(request.query.eventId);
   const userId = String(request.query.userId);
 
@@ -1447,7 +1447,7 @@ export const JoinExhibitionTournament = functions.runWith({ memory: "512MB" }).h
   }).catch();
 });
 
-export const JoinProTournament = functions.runWith({ memory: "512MB" }).https.onRequest(async (request, response) => {
+export const JoinProTournament = functions.runWith({ memory: "256MB" }).https.onRequest(async (request, response) => {
   const tournamentId = String(request.query.eventId);
   const userId = String(request.query.userId);
 
@@ -1473,7 +1473,7 @@ export const JoinProTournament = functions.runWith({ memory: "512MB" }).https.on
   }).catch();
 });
 
-export const StartTournamentGame = functions.runWith({ memory: "512MB" }).https.onRequest(async (request, response) => {
+export const StartTournamentGame = functions.runWith({ memory: "256MB" }).https.onRequest(async (request, response) => {
   const tournamentId = String(request.query.eventId);
   const userId = String(request.query.userId);
 
@@ -1511,7 +1511,7 @@ export const StartTournamentGame = functions.runWith({ memory: "512MB" }).https.
 
 
 
-export const GetActiveTournaments = functions.runWith({ memory: "512MB" }).https.onRequest(
+export const GetActiveTournaments = functions.runWith({ memory: "256MB" }).https.onRequest(
   async (request, response) => {
     response.set('Access-Control-Allow-Origin', '*');
     tournament.getActiveTournaments().then((snapshot) => {
@@ -1528,7 +1528,7 @@ export const GetActiveTournaments = functions.runWith({ memory: "512MB" }).https
     });
   });
 
-export const GetActiveTournamentsForPlayer = functions.runWith({ memory: "512MB" }).https.onRequest(async (request, response) => {
+export const GetActiveTournamentsForPlayer = functions.runWith({ memory: "256MB" }).https.onRequest(async (request, response) => {
   // response.set('Access-Control-Allow-Origin', '*');
   const userId = String(request.query.userId);
   if (request.query.userId === undefined || userId === "") {
@@ -1545,7 +1545,7 @@ export const GetActiveTournamentsForPlayer = functions.runWith({ memory: "512MB"
   response.send(JSON.stringify(orderedElements));
 });
 
-export const GetActiveTournamentsCall = functions.runWith({ memory: "512MB" }).https.onCall((data, context) => {
+export const GetActiveTournamentsCall = functions.runWith({ memory: "256MB" }).https.onCall((data, context) => {
   tournament.getActiveTournaments().then((snapshot) => {
     return snapshot.toJSON();
   }).catch(err => {
@@ -1556,7 +1556,7 @@ export const GetActiveTournamentsCall = functions.runWith({ memory: "512MB" }).h
   });
 });
 
-export const GetCurrentEventAverage = functions.runWith({ memory: "512MB" }).https.onRequest(async (request, response) => {
+export const GetCurrentEventAverage = functions.runWith({ memory: "256MB" }).https.onRequest(async (request, response) => {
   const eventId = String(request.query.eventId);
   if (request.query.eventId === undefined) {
     response.send({
@@ -1582,7 +1582,7 @@ export const GetCurrentEventAverage = functions.runWith({ memory: "512MB" }).htt
   return;
 });
 
-export const AddScoreToTournament = functions.runWith({ memory: "512MB" }).https.onRequest(async (request, response) => {
+export const AddScoreToTournament = functions.runWith({ memory: "256MB" }).https.onRequest(async (request, response) => {
   const tournamentId = String(request.query.eventId);
   if (request.query.eventId === undefined) {
     response.send({
@@ -1618,7 +1618,7 @@ export const AddScoreToTournament = functions.runWith({ memory: "512MB" }).https
 //#endregion
 
 //#region Prices
-export const AcceptPrizeForTournament = functions.runWith({ memory: "512MB" }).https.onRequest(async (request, response) => {
+export const AcceptPrizeForTournament = functions.runWith({ memory: "256MB" }).https.onRequest(async (request, response) => {
   const tournamentId = String(request.query.eventId);
   const userId = String(request.query.userId);
   if (request.query.eventId === undefined || request.query.userId === undefined) {
@@ -1643,7 +1643,7 @@ export const AcceptPrizeForTournament = functions.runWith({ memory: "512MB" }).h
     }).catch();
 });
 
-export const GetPendingEventFinale = functions.runWith({ memory: "512MB" }).https.onRequest(async (request, response) => {
+export const GetPendingEventFinale = functions.runWith({ memory: "256MB" }).https.onRequest(async (request, response) => {
 
   const userId = String(request.query.userId);
 
@@ -1659,7 +1659,7 @@ export const GetPendingEventFinale = functions.runWith({ memory: "512MB" }).http
 
 //#endregion
 
-export const RequestWeeklyReward = functions.runWith({ memory: "512MB" }).https.onRequest(async (request, response) => {
+export const RequestWeeklyReward = functions.runWith({ memory: "256MB" }).https.onRequest(async (request, response) => {
 
   if (request.query.userId === undefined) {
     response.send("Missing UserId");
@@ -1674,7 +1674,7 @@ export const RequestWeeklyReward = functions.runWith({ memory: "512MB" }).https.
   }
 });
 
-export const CanRequestWeeklyReward = functions.runWith({ memory: "512MB" }).https.onRequest(async (request, response) => {
+export const CanRequestWeeklyReward = functions.runWith({ memory: "256MB" }).https.onRequest(async (request, response) => {
 
   if (request.query.userId === undefined) {
     response.send("Missing UserId");
@@ -1690,7 +1690,7 @@ export const CanRequestWeeklyReward = functions.runWith({ memory: "512MB" }).htt
 });
 
 //#region NewEvent
-export const CreateTopPlayerEvent = functions.runWith({ memory: "512MB" }).https.onRequest(async (request, response) => {
+export const CreateTopPlayerEvent = functions.runWith({ memory: "256MB" }).https.onRequest(async (request, response) => {
   console.log("zpln --- CreateTopPlayerEvent");
   let delayInDays: number = Number(request.query.delayInDays);
 
@@ -1702,7 +1702,7 @@ export const CreateTopPlayerEvent = functions.runWith({ memory: "512MB" }).https
     .catch(() => response.send("Error"));
 });
 
-export const CreateHighScoreEvent = functions.runWith({ memory: "512MB" }).https.onRequest(async (request, response) => {
+export const CreateHighScoreEvent = functions.runWith({ memory: "256MB" }).https.onRequest(async (request, response) => {
   console.log("zpln --- CreateHighScoreEvent");
   let delayInDays: number = Number(request.query.delayInDays);
 
@@ -1714,7 +1714,7 @@ export const CreateHighScoreEvent = functions.runWith({ memory: "512MB" }).https
     .catch(() => response.send("Error"));
 });
 
-export const CreateSponsoredEvent = functions.runWith({ memory: "512MB" }).https.onRequest(async (request, response) => {
+export const CreateSponsoredEvent = functions.runWith({ memory: "256MB" }).https.onRequest(async (request, response) => {
   console.log("zpln --- CreateSponsoredEvent");
   let delayInDays: number = Number(request.query.delayInDays);
 
@@ -1726,7 +1726,7 @@ export const CreateSponsoredEvent = functions.runWith({ memory: "512MB" }).https
     .catch(() => response.send("Error"));
 });
 
-export const GetSampleSponsoredEventData = functions.runWith({ memory: "512MB" }).https.onRequest(async (request, response) => {
+export const GetSampleSponsoredEventData = functions.runWith({ memory: "256MB" }).https.onRequest(async (request, response) => {
   let data = { ...tournament_card.SponsoredEventDataTemplate };
   response.send(data);
 });
@@ -1797,7 +1797,7 @@ export const GetSampleSponsoredEventData = functions.runWith({ memory: "512MB" }
 
 //
 
-export const CreateSponsoredEventAPI = functions.runWith({ memory: "512MB" }).https.onRequest(async (request, response) => {
+export const CreateSponsoredEventAPI = functions.runWith({ memory: "256MB" }).https.onRequest(async (request, response) => {
   try {
     // Helper parsers
     const parseNumber = (v: any, def: any = undefined) => {
@@ -1907,7 +1907,7 @@ export const GetAllUsers = functions.runWith({ memory: "512MB" }).https.onReques
 
 
 
-export const CleanUserAuth = functions.runWith({ memory: "512MB" }).https.onRequest(async (request, response) => {
+export const CleanUserAuth = functions.runWith({ memory: "256MB" }).https.onRequest(async (request, response) => {
 
   utils.listAllUsers().then(uids => {
     //console.log(uids);
@@ -1934,7 +1934,7 @@ export const GetPlayerList = functions.runWith({ memory: "512MB" }).https.onRequ
 });
 
 
-export const CleanPracticeScores = functions.runWith({ memory: "512MB" }).https.onRequest(
+export const CleanPracticeScores = functions.runWith({ memory: "256MB" }).https.onRequest(
   async (request, response) => {
 
     utils.CleanPracticeScores().then(() => {
@@ -1948,7 +1948,7 @@ export const CleanPracticeScores = functions.runWith({ memory: "512MB" }).https.
 
   });
 
-export const CleanLeaderboards = functions.runWith({ memory: "512MB" }).https.onRequest(
+export const CleanLeaderboards = functions.runWith({ memory: "256MB" }).https.onRequest(
   async (request, response) => {
 
     let exceptActive: boolean = String(request.query.exceptActive) === 'true';
@@ -1968,19 +1968,19 @@ export const CleanLeaderboards = functions.runWith({ memory: "512MB" }).https.on
 
   });
 
-export const ResetHighScoreLeaderboard = functions.runWith({ memory: "512MB" }).https.onRequest(
+export const ResetHighScoreLeaderboard = functions.runWith({ memory: "256MB" }).https.onRequest(
   async (request, response) => {
     await leaderboards.resetHighScoreLeaderboard();
     response.status(200).send("{status:1}");
   });
 
-export const ResetJackpotLeaderboard = functions.runWith({ memory: "512MB" }).https.onRequest(
+export const ResetJackpotLeaderboard = functions.runWith({ memory: "256MB" }).https.onRequest(
   async (request, response) => {
     await leaderboards.resetJackpotLeaderboard();
     response.status(200).send("{status:1}");
   });
 
-export const GetPlayerLeaderboardRank = functions.runWith({ memory: "512MB" }).https.onRequest(
+export const GetPlayerLeaderboardRank = functions.runWith({ memory: "256MB" }).https.onRequest(
   async (request, response) => {
 
     const userId: string | null = String(request.query.userId);
@@ -2010,7 +2010,7 @@ export const GetPlayerLeaderboardRank = functions.runWith({ memory: "512MB" }).h
   });
 
 
-export const GetHighScoreLeaderboard = functions.runWith({ memory: "512MB" }).https.onRequest(async (request, response) => {
+export const GetHighScoreLeaderboard = functions.runWith({ memory: "256MB" }).https.onRequest(async (request, response) => {
 
   /*if (request.query.userId === undefined){
     response.send("Error");
@@ -2030,7 +2030,7 @@ export const GetHighScoreLeaderboard = functions.runWith({ memory: "512MB" }).ht
 
 });
 
-export const GetEventLeaderboard = functions.runWith({ memory: "512MB" }).https.onRequest(
+export const GetEventLeaderboard = functions.runWith({ memory: "256MB" }).https.onRequest(
   async (request, response) => {
 
     if (request.query.eventId === undefined) {
@@ -2054,7 +2054,7 @@ export const GetEventLeaderboard = functions.runWith({ memory: "512MB" }).https.
 
   });
 
-export const GetJackpotLeaderboard = functions.runWith({ memory: "512MB" }).https.onRequest(
+export const GetJackpotLeaderboard = functions.runWith({ memory: "256MB" }).https.onRequest(
   async (request, response) => {
 
     let userId = null;
@@ -2067,7 +2067,7 @@ export const GetJackpotLeaderboard = functions.runWith({ memory: "512MB" }).http
 
   });
 
-export const GetAudienceLeaderboard = functions.runWith({ memory: "512MB" }).https.onRequest(
+export const GetAudienceLeaderboard = functions.runWith({ memory: "256MB" }).https.onRequest(
   async (request, response) => {
     let limit = 50;
     let userId: string | null = String(request.query.userId);
@@ -2081,7 +2081,7 @@ export const GetAudienceLeaderboard = functions.runWith({ memory: "512MB" }).htt
 
   });
 
-export const GetCoinBasedLeaderboard = functions.runWith({ memory: "512MB" }).https.onRequest(
+export const GetCoinBasedLeaderboard = functions.runWith({ memory: "256MB" }).https.onRequest(
   async (request, response) => {
     
     let limit = 50;
@@ -2103,7 +2103,7 @@ export const GetCoinBasedLeaderboard = functions.runWith({ memory: "512MB" }).ht
 
   });
 
-export const GetAllLeaderboardsForPlayer = functions.runWith({ memory: "512MB" }).https.onRequest(
+export const GetAllLeaderboardsForPlayer = functions.runWith({ memory: "256MB" }).https.onRequest(
   async (request, response) => {
 
     const userId = String(request.query.userId);
@@ -2155,7 +2155,7 @@ export const GetAllLeaderboardsForPlayer = functions.runWith({ memory: "512MB" }
 
 //#region Practice Games
 
-export const NextPracticeGame = functions.runWith({ memory: "512MB" }).https.onRequest(async (request, response) => {
+export const NextPracticeGame = functions.runWith({ memory: "256MB" }).https.onRequest(async (request, response) => {
 
   const userId = String(request.query.userId);
 
@@ -2169,7 +2169,7 @@ export const NextPracticeGame = functions.runWith({ memory: "512MB" }).https.onR
   return;
 });
 
-export const GetPracticeGameFromGameIndex = functions.runWith({ memory: "512MB" }).https.onRequest(async (request, response) => {
+export const GetPracticeGameFromGameIndex = functions.runWith({ memory: "256MB" }).https.onRequest(async (request, response) => {
 
   let gameIndex = Number(request.query.gameIndex);
   if(isNaN(gameIndex))
@@ -2185,7 +2185,7 @@ export const GetPracticeGameFromGameIndex = functions.runWith({ memory: "512MB" 
 //#endregion
 
 //#region Vault and Levels
-export const AddCoinsFromAction = functions.runWith({ memory: "512MB" }).https.onRequest(async (request, response) => {
+export const AddCoinsFromAction = functions.runWith({ memory: "256MB" }).https.onRequest(async (request, response) => {
   const userId: string | null = String(request.query.userId);
   if (request.query.userId === undefined) {
     response.status(500).send("Error. Missing UserId");
@@ -2240,7 +2240,7 @@ export const AddCoinsFromAction = functions.runWith({ memory: "512MB" }).https.o
   }
 });
 
-export const GetVaultAndLevel = functions.runWith({ memory: "512MB" }).https.onRequest(async (request, response) => {
+export const GetVaultAndLevel = functions.runWith({ memory: "256MB" }).https.onRequest(async (request, response) => {
   const userId: string | null = String(request.query.userId);
   if (request.query.userId === undefined) {
     response.status(500).send("Error. Missing UserId");
@@ -2292,7 +2292,7 @@ export const ResetAllUsersData = functions.runWith({
 
   });
 
-export const ConvertCoinsIntoCash = functions.runWith({ memory: "512MB" }).https.onRequest(async (request, response) => {
+export const ConvertCoinsIntoCash = functions.runWith({ memory: "256MB" }).https.onRequest(async (request, response) => {
   const userId: string | null = String(request.query.userId);
   if (request.query.userId === undefined) {
     response.send("Error. Missing UserId");
@@ -2325,7 +2325,7 @@ export const ConvertCoinsIntoCashForAllUsers = functions.runWith({ memory: "512M
   }
 });
 
-export const ResetCash = functions.runWith({ memory: "512MB" }).https.onRequest(async (request, response) => {
+export const ResetCash = functions.runWith({ memory: "256MB" }).https.onRequest(async (request, response) => {
   const userId: string | null = String(request.query.userId);
   if (request.query.userId === undefined) {
     response.send("Error. Missing UserId");
@@ -2405,7 +2405,7 @@ export const ResetMakaForAll = functions.runWith({ memory: "512MB" }).https.onRe
   }
 });
 
-export const AddLiraToVault = functions.runWith({ memory: "512MB" }).https.onRequest(async (request, response) => {
+export const AddLiraToVault = functions.runWith({ memory: "256MB" }).https.onRequest(async (request, response) => {
 
   const userId = String(request.query.userId);
   const lira = Number(request.query.lira);
@@ -2450,7 +2450,7 @@ export const AddLiraToVault = functions.runWith({ memory: "512MB" }).https.onReq
 
 });
 
-export const ConvertLiraToCoins = functions.runWith({ memory: "512MB" }).https.onRequest(async (request, response) => {
+export const ConvertLiraToCoins = functions.runWith({ memory: "256MB" }).https.onRequest(async (request, response) => {
 
   const userId = String(request.query.userId);
   const coins = Number(request.query.coins);
@@ -2471,7 +2471,7 @@ export const ConvertLiraToCoins = functions.runWith({ memory: "512MB" }).https.o
     }).catch();
 });
 
-export const RedeemVaultWithAmount = functions.runWith({ memory: "512MB" }).https.onRequest(async (request, response) => {
+export const RedeemVaultWithAmount = functions.runWith({ memory: "256MB" }).https.onRequest(async (request, response) => {
 
   const userId = String(request.query.userId);
   if (request.query.userId === undefined || userId === "") {
@@ -2511,7 +2511,7 @@ export const CreateDAUReport = functions.runWith({ memory: "512MB" }).https.onRe
 //endregion
 
 //#region Testing
-export const TestGetEventFromDatabase = functions.runWith({ memory: "512MB" }).https.onRequest(async (request, response): Promise<any> => {
+export const TestGetEventFromDatabase = functions.runWith({ memory: "256MB" }).https.onRequest(async (request, response): Promise<any> => {
   const eventId = String(request.query.eventId);
   try {
     const evt = await Event_Data.get_from_database(eventId);
@@ -2839,7 +2839,7 @@ export const RestoreSpillTreeAPI = functions.runWith({ timeoutSeconds: 540, memo
 //   }
 // });
 
-export const GetMiningData = functions.runWith({ memory: "512MB" }).https.onRequest(async (request, response) => {
+export const GetMiningData = functions.runWith({ memory: "256MB" }).https.onRequest(async (request, response) => {
   const userId = String(request.query.userId || "");
   if (!userId) {
     response.status(400).json({ error: "missing userId" });
@@ -2926,7 +2926,7 @@ export const GetMiningData = functions.runWith({ memory: "512MB" }).https.onRequ
   }
 });
 
-export const GetMyTop5Players = functions.runWith({ memory: "512MB" }).https.onRequest(async (request, response) => {
+export const GetMyTop5Players = functions.runWith({ memory: "256MB" }).https.onRequest(async (request, response) => {
   const q: any = request.method === "GET" ? request.query : request.body;
   const userId = String(q.userId || q.uid || "").trim();
 
@@ -2951,7 +2951,7 @@ export const GetMyTop5Players = functions.runWith({ memory: "512MB" }).https.onR
   }
 });
 
-export const GetUserNotificationsAPI = functions.runWith({ memory: "512MB" }).https.onRequest(async (request, response) => {
+export const GetUserNotificationsAPI = functions.runWith({ memory: "256MB" }).https.onRequest(async (request, response) => {
   const userId = String(request.query.userId || "");
   const limit = Number(request.query.limit || 20);
   const unreadOnly = String(request.query.unreadOnly || "false").toLowerCase() === "true";
@@ -2975,7 +2975,7 @@ export const GetUserNotificationsAPI = functions.runWith({ memory: "512MB" }).ht
   }
 });
 
-export const MarkNotificationAsReadAPI = functions.runWith({ memory: "512MB" }).https.onRequest(async (request, response) => {
+export const MarkNotificationAsReadAPI = functions.runWith({ memory: "256MB" }).https.onRequest(async (request, response) => {
   const userId = String(request.query.userId || "");
   const notificationId = String(request.query.notificationId || "");
 
@@ -3000,7 +3000,7 @@ export const MarkNotificationAsReadAPI = functions.runWith({ memory: "512MB" }).
   }
 });
 
-export const MarkAllNotificationsAsReadAPI = functions.runWith({ memory: "512MB" }).https.onRequest(async (request, response) => {
+export const MarkAllNotificationsAsReadAPI = functions.runWith({ memory: "256MB" }).https.onRequest(async (request, response) => {
   const userId = String(request.query.userId || "");
 
   if (!userId) {
@@ -3021,7 +3021,7 @@ export const MarkAllNotificationsAsReadAPI = functions.runWith({ memory: "512MB"
   }
 });
 
-export const SendEmail = functions.runWith({ memory: "512MB" }).https.onRequest(async (request, response) => {
+export const SendEmail = functions.runWith({ memory: "256MB" }).https.onRequest(async (request, response) => {
 
   const email = String(request.query.email);
 
@@ -3039,7 +3039,7 @@ export const TestWeeklyReset = functions.runWith({ memory: "512MB" }).https.onRe
   response.send("Weekly Reset Done");
 });
 
-export const IsStagingEnvironment = functions.runWith({ memory: "512MB" }).https.onRequest(async (req, res) => {
+export const IsStagingEnvironment = functions.runWith({ memory: "256MB" }).https.onRequest(async (req, res) => {
   res.send(environments.STAGING);
 });
 
@@ -3123,7 +3123,7 @@ export const StopControlledShareLinkEventForAllUsers = functions.runWith({ memor
   response.send("StopControlledShareLinkEventForAllUsers---");
 });
 
-export const InvitesLeftWithUser = functions.runWith({ memory: "512MB" }).https.onRequest(async (request, response) => {
+export const InvitesLeftWithUser = functions.runWith({ memory: "256MB" }).https.onRequest(async (request, response) => {
   const userId = String(request.query.userId);
   if (request.query.userId === undefined || userId === "") {
     response.send("Error: no UserId");
@@ -3134,7 +3134,7 @@ export const InvitesLeftWithUser = functions.runWith({ memory: "512MB" }).https.
   response.send({numberOfInvitesLeft});//.toString()
 });
 
-export const IsInviteCodeValid = functions.runWith({ memory: "512MB" }).https.onRequest(async (request, response) => {
+export const IsInviteCodeValid = functions.runWith({ memory: "256MB" }).https.onRequest(async (request, response) => {
   const inviteCode = String(request.query.inviteCode);
 
   console.log("IsInviteCodeValid called - inviteCode: " + inviteCode);
@@ -3149,7 +3149,7 @@ export const IsInviteCodeValid = functions.runWith({ memory: "512MB" }).https.on
   response.send({ valid: true, parentUid, parentName });
 });
 
-export const GetCurrentTimeInISO = functions.runWith({ memory: "512MB" }).https.onRequest(async (req, res) => {
+export const GetCurrentTimeInISO = functions.runWith({ memory: "256MB" }).https.onRequest(async (req, res) => {
   const hours = Number(req.query.hours);
   const currentTime = new Date();
   const convertedDatetime = new Date(currentTime);
@@ -3224,7 +3224,7 @@ export const RemoveUserEventsFromRdWhoHasPrizeIsFalse = functions.runWith({ memo
   }
 });
 
-export const GetDefaultPrizeData = functions.runWith({ memory: "512MB" }).https.onRequest(async (request, response) => {
+export const GetDefaultPrizeData = functions.runWith({ memory: "256MB" }).https.onRequest(async (request, response) => {
   try {
     const q = request.method === "GET" ? request.query : request.body;
     const eventType = Number(q.eventType);
@@ -3245,7 +3245,7 @@ export const GetDefaultPrizeData = functions.runWith({ memory: "512MB" }).https.
 });
 
 
-export const NeedUpdate = functions.runWith({ memory: "512MB" }).https.onRequest(async (request, response) => {
+export const NeedUpdate = functions.runWith({ memory: "256MB" }).https.onRequest(async (request, response) => {
 
   const platform = String(request.query.platform);
   if (request.query.platform === undefined || platform === null) {
@@ -3306,7 +3306,7 @@ export const Analytics_GetPlayersAtWave = functions.runWith({ memory: "512MB" })
 });
 //
 
-export const TestIsUserCallingApiAuthenticated = functions.runWith({ memory: "512MB" }).https.onRequest(async (req, res) => {
+export const TestIsUserCallingApiAuthenticated = functions.runWith({ memory: "256MB" }).https.onRequest(async (req, res) => {
 
   // Check if the user is authenticated
   const authHeader = req.headers.authorization;
@@ -3329,7 +3329,7 @@ export const TestIsUserCallingApiAuthenticated = functions.runWith({ memory: "51
     });
 });
 
-export const TestCreateDynamicLinkForInviteCode = functions.runWith({ memory: "512MB" }).https.onRequest(async (req, res) => {
+export const TestCreateDynamicLinkForInviteCode = functions.runWith({ memory: "256MB" }).https.onRequest(async (req, res) => {
 
   const inviteCode = String(req.query.inviteCode || '').trim();
   if (!inviteCode) {
@@ -3368,7 +3368,7 @@ export const TestCreateDynamicLinkForInviteCode = functions.runWith({ memory: "5
   }
 });
 
-export const TestABC = functions.runWith({ memory: "512MB" }).https.onRequest(async (req, res) => {
+export const TestABC = functions.runWith({ memory: "256MB" }).https.onRequest(async (req, res) => {
   // const userId = String(req.query.userId);
 
   // res.send(await controlled_invites.isInviteEventActive());
@@ -3379,46 +3379,20 @@ export const TestABC = functions.runWith({ memory: "512MB" }).https.onRequest(as
   // res.send("TestABC success!!");
 });
 
-export const TestDecrementInviteCount = functions.runWith({ memory: "512MB" }).https.onRequest(async (request, response) => {
+export const TestDecrementInviteCount = functions.runWith({ memory: "256MB" }).https.onRequest(async (request, response) => {
   const userId = String(request.query.userId);
   controlled_invites.decrementInvitesLeft(userId);
   response.send('Done');
 });
 
 
-export const TestGetRealtimeDatabaseName = functions.runWith({ memory: "512MB" }).https.onRequest(async (req, res) => {
+export const TestGetRealtimeDatabaseName = functions.runWith({ memory: "256MB" }).https.onRequest(async (req, res) => {
   const databaseName = admin.database().ref().toString();
     console.log(`Firebase Realtime Database Name: ${databaseName}`);
   res.send(`Firebase Realtime Database Name: ${databaseName}`);
 });
 
-exports.watchCoinValueChanges = functions.database.ref('/Users/{UID}/vault/coins')
-  .onUpdate((change, context) => {
-    const newValue = change.after.val();
-    const previousValue = change.before.val();
-
-    if (newValue !== previousValue) {
-      console.log(`Coin value changed for user ${context.params.UID}. New value: ${newValue} . from ${previousValue}`);
-      // Add your logic here, such as sending notifications or triggering further actions.
-    }
-
-    return null;
-  });
-
-exports.watchSavedAvatarURLChanges = functions.database.ref('/Users/{UID}/SavedAvatarURL')
-.onUpdate((change, context) => {
-  const newValue = change.after.val();
-  const previousValue = change.before.val();
-
-  if (newValue !== previousValue) {
-    console.log(`SavedAvatarURL changed for user ${context.params.UID}. New value: ${newValue} . from ${previousValue}`);
-    // Add your logic here, such as sending notifications or triggering further actions.
-  }
-
-  return null;
-});
-
-export const watchActiveTournaments = functions.runWith({ memory: "512MB" }).database.ref('/Active_Tournaments/{tournamentId}')
+export const watchActiveTournaments = functions.runWith({ memory: "256MB" }).database.ref('/Active_Tournaments/{tournamentId}')
   .onCreate(async (snapshot, context) => {
  
     console.log('New item added::', snapshot.key);
@@ -3469,13 +3443,13 @@ export const OnUserNeoZplnMiningUpdated = functions.database
   });
   //#endregion
 
-  export const GetIngamePopupsList = functions.runWith({ memory: "512MB" }).https.onRequest(async (request, response) => {
+  export const GetIngamePopupsList = functions.runWith({ memory: "256MB" }).https.onRequest(async (request, response) => {
     const list = await ingame_popups.getIngamePopupsList();
     let str = JSON.stringify(list);
     response.send(str);
   });
 
-  export const AddIngamePopup = functions.runWith({ memory: "512MB" }).https.onRequest(async (request, response) => {
+  export const AddIngamePopup = functions.runWith({ memory: "256MB" }).https.onRequest(async (request, response) => {
     const img = String(request.query.img);
     if (request.query.img === undefined || img === null) {
       response.send("Error: no img");
@@ -3485,7 +3459,7 @@ export const OnUserNeoZplnMiningUpdated = functions.database
     response.send("popup added: " + img);
   });
 
-  export const GetPlayerGameplayCountForTournament = functions.runWith({ memory: "512MB" }).https.onRequest(async (request, response) => {
+  export const GetPlayerGameplayCountForTournament = functions.runWith({ memory: "256MB" }).https.onRequest(async (request, response) => {
     const userId = String(request.query.userId);
     if (request.query.userId === undefined || userId === null) {
       response.send("Error: no userId");
@@ -3503,7 +3477,7 @@ export const OnUserNeoZplnMiningUpdated = functions.database
     response.send(gameCount+"");
   });
 
-  export const GetGameSetCountCompletedByPlayerForTournament = functions.runWith({ memory: "512MB" }).https.onRequest(async (request, response) => {
+  export const GetGameSetCountCompletedByPlayerForTournament = functions.runWith({ memory: "256MB" }).https.onRequest(async (request, response) => {
     const userId = String(request.query.userId);
     if (request.query.userId === undefined || userId === null) {
       response.send("Error: no userId");
@@ -3521,7 +3495,7 @@ export const OnUserNeoZplnMiningUpdated = functions.database
     response.send(gameSetCount+"");
   });
 
-  export const GetNextExhibitionGameSongName = functions.runWith({ memory: "512MB" }).https.onRequest(async (request, response) => {
+  export const GetNextExhibitionGameSongName = functions.runWith({ memory: "256MB" }).https.onRequest(async (request, response) => {
     const userId = String(request.query.userId);
     if (request.query.userId === undefined || userId === null) {
       response.send("Error: no userId");
@@ -3550,7 +3524,7 @@ export const OnUserNeoZplnMiningUpdated = functions.database
     response.send('Done');
   });
 
-  export const GetWavescoreDataForUser = functions.runWith({ memory: "512MB" }).https.onRequest(async (request, response) => {
+  export const GetWavescoreDataForUser = functions.runWith({ memory: "256MB" }).https.onRequest(async (request, response) => {
     const userId = String(request.query.userId);
     if (request.query.userId === undefined || userId === null) {
       response.send("Error: no userId");
@@ -3561,7 +3535,7 @@ export const OnUserNeoZplnMiningUpdated = functions.database
     response.send(jsonData);
   });
   
-  export const GetLevel1PlayersDataForUser = functions.runWith({ memory: "512MB" }).https.onRequest(async (request, response) => {
+  export const GetLevel1PlayersDataForUser = functions.runWith({ memory: "256MB" }).https.onRequest(async (request, response) => {
     const userId = String(request.query.userId);
     if (request.query.userId === undefined || userId === null) {
       response.send("Error: no userId");
@@ -3729,7 +3703,7 @@ export const OnUserNeoZplnMiningUpdated = functions.database
     return { childIds, children };
   }
 
-export const GetChildrenDetailsAPI = functions.runWith({ memory: "512MB" }).https.onRequest(async (request, response) => {
+export const GetChildrenDetailsAPI = functions.runWith({ memory: "256MB" }).https.onRequest(async (request, response) => {
     try {
       const q: any = request.method === "GET" ? request.query : request.body;
       const userId = String(q.userId || q.uid || "").trim();
@@ -3782,7 +3756,7 @@ export const GetChildrenDetailsAPI = functions.runWith({ memory: "512MB" }).http
   });
 
 
-  export const GetRankAndGlobalAverageForUser = functions.runWith({ memory: "512MB" }).https.onRequest(async (request, response) => {
+  export const GetRankAndGlobalAverageForUser = functions.runWith({ memory: "256MB" }).https.onRequest(async (request, response) => {
     const userId = String(request.query.userId);
     if (request.query.userId === undefined || userId === null) {
       response.send("Error: no userId");
@@ -3854,7 +3828,7 @@ export const GetChildrenDetailsAPI = functions.runWith({ memory: "512MB" }).http
 //   }
 // });
 
-  export const TimeRemainingForEventToEnd = functions.runWith({ memory: "512MB" }).https.onRequest(async (request, response) => {
+  export const TimeRemainingForEventToEnd = functions.runWith({ memory: "256MB" }).https.onRequest(async (request, response) => {
 
     console.log("---------------1");
     const eventId = String(request.query.eventId);
@@ -3881,7 +3855,7 @@ export const GetChildrenDetailsAPI = functions.runWith({ memory: "512MB" }).http
     );
   });
 
-  export const GetCoinsForUser = functions.runWith({ memory: "512MB" }).https.onRequest(async (request, response) => {
+  export const GetCoinsForUser = functions.runWith({ memory: "256MB" }).https.onRequest(async (request, response) => {
     const userId = String(request.query.userId);
     if (request.query.userId === undefined || userId === null) {
       response.send("Error: no userId");
@@ -3903,7 +3877,7 @@ export const GetChildrenDetailsAPI = functions.runWith({ memory: "512MB" }).http
       });
   });
 
-  export const GetCashVaultDetails = functions.runWith({ memory: "512MB" }).https.onRequest(async (request, response) => {
+  export const GetCashVaultDetails = functions.runWith({ memory: "256MB" }).https.onRequest(async (request, response) => {
   const userId = String(request.query.userId || "");
   if (!userId) {
     response.status(400).json({ error: "Missing userId" });
@@ -3962,7 +3936,7 @@ export const GetChildrenDetailsAPI = functions.runWith({ memory: "512MB" }).http
 });
 
 
-export const GetBlockchainAPI = functions.runWith({ memory: "512MB" }).https.onRequest(async (request, response) => {
+export const GetBlockchainAPI = functions.runWith({ memory: "256MB" }).https.onRequest(async (request, response) => {
   const userId = String(request.query.userId || "");
   if (!userId) {
     response.status(400).json({ error: "Missing userId" });
@@ -4021,7 +3995,7 @@ export const GetBlockchainAPI = functions.runWith({ memory: "512MB" }).https.onR
 });
 
 
-  export const PaidToUser = functions.runWith({ memory: "512MB" }).https.onRequest(async (request, response) => {
+  export const PaidToUser = functions.runWith({ memory: "256MB" }).https.onRequest(async (request, response) => {
     const userId = String(request.query.userId);
     if (request.query.userId === undefined || userId === null) {
       response.send("Error: no userId");
@@ -4055,7 +4029,7 @@ export const GetBlockchainAPI = functions.runWith({ memory: "512MB" }).https.onR
   });
 
 
-  export const PayMe = functions.runWith({ memory: "512MB" }).https.onRequest(async (request, response) => {
+  export const PayMe = functions.runWith({ memory: "256MB" }).https.onRequest(async (request, response) => {
     const userId = String(request.query.userId);
     if (request.query.userId === undefined || userId === null) {
       response.send("Error: no userId");
@@ -4111,7 +4085,7 @@ export const GetBlockchainAPI = functions.runWith({ memory: "512MB" }).https.onR
 
 
   //Get pro event List API
-export const GetProBrandEventList = functions.runWith({ memory: "512MB" }).https.onRequest(async (request, response) => {
+export const GetProBrandEventList = functions.runWith({ memory: "256MB" }).https.onRequest(async (request, response) => {
     try {
         const list = await tournament.getProBrandEventList();
         response.status(200).json(list);
@@ -4125,7 +4099,7 @@ export const GetProBrandEventList = functions.runWith({ memory: "512MB" }).https
 
 ///GetCurrentGameStatusOfEventAPI
 
-export const GetCurrentGameStatusOfEventAPI = functions.runWith({ memory: "512MB" }).https.onRequest(async (request, response) => {
+export const GetCurrentGameStatusOfEventAPI = functions.runWith({ memory: "256MB" }).https.onRequest(async (request, response) => {
     const userId = String(request.query.userId);
     const eventId = String(request.query.eventId);
 
@@ -4140,7 +4114,7 @@ export const GetCurrentGameStatusOfEventAPI = functions.runWith({ memory: "512MB
 ////GetCurrentGameStatusOfEventAPI____END
 
 
-export const GetUserWinningHistory = functions.runWith({ memory: "512MB" }).https.onRequest(async (request, response) => {
+export const GetUserWinningHistory = functions.runWith({ memory: "256MB" }).https.onRequest(async (request, response) => {
   try {
     const q = request.method === "GET" ? request.query : request.body;
     const userId = String(q.userId || q.uid || "");
@@ -4190,7 +4164,7 @@ export const GetUserWinningHistory = functions.runWith({ memory: "512MB" }).http
 
 // ...existing imports top ensure vault enum exported...
 // Replace previous VaultWithdrawalAPI implementation:
-export const VaultWithdrawalAPI = functions.runWith({ memory: "512MB" }).https.onRequest(async (request, response) => {
+export const VaultWithdrawalAPI = functions.runWith({ memory: "256MB" }).https.onRequest(async (request, response) => {
   try {
     const q = request.method === "GET" ? request.query : request.body;
     const userId = String(q.userId || q.uid || "").trim();
@@ -4375,12 +4349,12 @@ export const VaultWithdrawalAPI = functions.runWith({ memory: "512MB" }).https.o
   }
 });
 
-export const ListWithdrawalTokenTypes = functions.runWith({ memory: "512MB" }).https.onRequest(async (_req, res) => {
+export const ListWithdrawalTokenTypes = functions.runWith({ memory: "256MB" }).https.onRequest(async (_req, res) => {
   res.status(200).json({ tokens: vault.listWithdrawalTokenTypes() });
 });
 
 
-export const GetUserRanksAPI = functions.runWith({ memory: "512MB" }).https.onRequest(async (request, response) => {
+export const GetUserRanksAPI = functions.runWith({ memory: "256MB" }).https.onRequest(async (request, response) => {
   const userId = String(request.query.userId || "");
   if (!userId) {
     response.status(400).json({ error: "Missing userId" });
@@ -4545,7 +4519,7 @@ export const GetUserRanksAPI = functions.runWith({ memory: "512MB" }).https.onRe
 
 
 
-export const ListUsersWithWithdrawalHistory = functions.runWith({ memory: "512MB" }).https.onRequest(async (request, response) => {
+export const ListUsersWithWithdrawalHistory = functions.runWith({ memory: "1GB" }).https.onRequest(async (request, response) => {
   try {
     const days = request.query.days ? Math.max(1, Math.min(90, Number(request.query.days))) : 30;
     const limit = request.query.limit ? Math.max(1, Math.min(1000, Number(request.query.limit))) : 200;
@@ -4680,7 +4654,7 @@ export const ListUsersWithWithdrawalHistory = functions.runWith({ memory: "512MB
 
 
 
-export const GetUserVIPStatusAPI = functions.runWith({ memory: "512MB" }).https.onRequest(async (request, response) => {
+export const GetUserVIPStatusAPI = functions.runWith({ memory: "256MB" }).https.onRequest(async (request, response) => {
   const userId = String(request.query.userId || "").trim();
   if (!userId) {
     response.status(400).json({ error: "Missing userId" });
@@ -4705,7 +4679,7 @@ export const GetUserVIPStatusAPI = functions.runWith({ memory: "512MB" }).https.
   }
 });
 
-export const GetTutorialStatus = functions.runWith({ memory: "512MB" }).https.onRequest(async (request, response) => {
+export const GetTutorialStatus = functions.runWith({ memory: "256MB" }).https.onRequest(async (request, response) => {
     const userId = String(request.query.userId || "").trim();
     if (!userId) {
         response.status(400).json({ error: "Missing userId" });
@@ -4721,7 +4695,7 @@ export const GetTutorialStatus = functions.runWith({ memory: "512MB" }).https.on
     }
 });
 
-export const UpdateTutorialStatus = functions.runWith({ memory: "512MB" }).https.onRequest(async (request, response) => {
+export const UpdateTutorialStatus = functions.runWith({ memory: "256MB" }).https.onRequest(async (request, response) => {
     const q = request.method === "GET" ? request.query : request.body;
     const userId = String(q.userId || "").trim();
     const field = String(q.field || "").trim() as userUtils.TutorialFieldKey;
@@ -4753,7 +4727,7 @@ export const UpdateTutorialStatus = functions.runWith({ memory: "512MB" }).https
     }
 });
 // Echo Pro Event APIs
-export const GetEchoProInviteCode = functions.runWith({ memory: "512MB" }).https.onRequest(async (request, response) => {
+export const GetEchoProInviteCode = functions.runWith({ memory: "256MB" }).https.onRequest(async (request, response) => {
   const userId = String(request.query.userId);
 
   if (request.query.userId === undefined || userId === null || userId.length === 0) {
@@ -4778,7 +4752,7 @@ export const GetEchoProInviteCode = functions.runWith({ memory: "512MB" }).https
   }
 });
 
-export const GetEchoProInviteLink = functions.runWith({ memory: "512MB" }).https.onRequest(async (request, response) => {
+export const GetEchoProInviteLink = functions.runWith({ memory: "256MB" }).https.onRequest(async (request, response) => {
   const userId = String(request.query.userId);
 
   if (request.query.userId === undefined || userId === null || userId.length === 0) {
@@ -4803,7 +4777,7 @@ export const GetEchoProInviteLink = functions.runWith({ memory: "512MB" }).https
   }
 });
 
-export const GetEchoProInviteCounter = functions.runWith({ memory: "512MB" }).https.onRequest(async (request, response) => {
+export const GetEchoProInviteCounter = functions.runWith({ memory: "256MB" }).https.onRequest(async (request, response) => {
   const userId = String(request.query.userId);
 
   if (!userId) {
@@ -4819,7 +4793,7 @@ export const GetEchoProInviteCounter = functions.runWith({ memory: "512MB" }).ht
     response.status(500).json({ error: "Internal Server Error" });
   }
 });
-export const GetEchoProReferrerInfo = functions.runWith({ memory: "512MB" }).https.onRequest((request, response) => {
+export const GetEchoProReferrerInfo = functions.runWith({ memory: "256MB" }).https.onRequest((request, response) => {
   cors(request, response, async () => {
     try {
       const code = String(request.query.code || "").trim();
@@ -4872,7 +4846,7 @@ export const GetEchoProReferrerInfo = functions.runWith({ memory: "512MB" }).htt
 
 // ...existing code...
 
-export const RegisterEchoProUserAPI = functions.runWith({ memory: "512MB" }).https.onRequest((request, response) => {
+export const RegisterEchoProUserAPI = functions.runWith({ memory: "256MB" }).https.onRequest((request, response) => {
   cors(request, response, async () => {
     try {
       const q: any = request.method === "GET" ? request.query : request.body;
@@ -5035,7 +5009,7 @@ await admin.database().ref(`${tournament.Users_DB}/${userId}`).update({
 // });
 
 
-export const ValidateEchoProPhoneForRegistration = functions.runWith({ memory: "512MB" }).https.onRequest(async (request, response) => {
+export const ValidateEchoProPhoneForRegistration = functions.runWith({ memory: "256MB" }).https.onRequest(async (request, response) => {
   try {
     const q: any = request.method === "GET" ? request.query : request.body;
     const phone = String(q.phone || "").trim();
@@ -5110,7 +5084,7 @@ function getCountdownParts(remainingMs: number) {
   return { days, hours, minutes };
 }
 
-export const GetEchoWebTimer23 = functions.runWith({ memory: "512MB" }).https.onRequest(async (request, response) => {
+export const GetEchoWebTimer23 = functions.runWith({ memory: "256MB" }).https.onRequest(async (request, response) => {
   try {
     const startAt = await getOrCreateEchoTimerStartAtMs();
     const now = Date.now();
@@ -5134,7 +5108,7 @@ export const GetEchoWebTimer23 = functions.runWith({ memory: "512MB" }).https.on
   }
 });
 
-export const GetEchoWebTimer = functions.runWith({ memory: "512MB" }).https.onRequest((request, response) => {
+export const GetEchoWebTimer = functions.runWith({ memory: "256MB" }).https.onRequest((request, response) => {
   cors(request, response, async () => {
     try {
       const startAt = await getOrCreateEchoTimerStartAtMs();
@@ -5160,7 +5134,7 @@ export const GetEchoWebTimer = functions.runWith({ memory: "512MB" }).https.onRe
   });
 });
 
-export const LoginEchoProUserAPI = functions.runWith({ memory: "512MB" }).https.onRequest((request, response) => {
+export const LoginEchoProUserAPI = functions.runWith({ memory: "256MB" }).https.onRequest((request, response) => {
   cors(request, response, async () => {
     try {
       const q: any = request.method === "GET" ? request.query : request.body;
@@ -5229,7 +5203,7 @@ export const LoginEchoProUserAPI = functions.runWith({ memory: "512MB" }).https.
 });
 
 
-export const GetCountryCodesAPI = functions.runWith({ memory: "512MB" }).https.onRequest((request, response) => {
+export const GetCountryCodesAPI = functions.runWith({ memory: "256MB" }).https.onRequest((request, response) => {
   cors(request, response, async () => {
     try {
       const snap = await admin.database().ref("Parameters/CountryCodes").once("value");
@@ -5352,7 +5326,7 @@ export const DeleteAllUsersExceptEchoProAPI = functions.runWith({
 });
 
 
-export const WalletElliglebleAPI = functions.runWith({ memory: "512MB" }).https.onRequest((request, response) => {
+export const WalletElliglebleAPI = functions.runWith({ memory: "256MB" }).https.onRequest((request, response) => {
   cors(request, response, async () => {
     try {
       const q: any = request.method === "GET" ? request.query : request.body;
@@ -5444,7 +5418,7 @@ export const WalletElliglebleAPI = functions.runWith({ memory: "512MB" }).https.
   });
 });
 
-export const WalletUserDataAPI = functions.runWith({ memory: "512MB" }).https.onRequest((request, response) => {
+export const WalletUserDataAPI = functions.runWith({ memory: "256MB" }).https.onRequest((request, response) => {
   cors(request, response, async () => {
     try {
       const q: any = request.method === "GET" ? request.query : request.body;
@@ -5496,7 +5470,7 @@ export const WalletUserDataAPI = functions.runWith({ memory: "512MB" }).https.on
   });
 });
 
-export const UpdateSavedWalletAddressAPI = functions.runWith({ memory: "512MB" }).https.onRequest((request, response) => {
+export const UpdateSavedWalletAddressAPI = functions.runWith({ memory: "256MB" }).https.onRequest((request, response) => {
   cors(request, response, async () => {
     try {
       const q: any = request.method === "GET" ? request.query : request.body;
@@ -5768,7 +5742,7 @@ async function buildAndSortSpillTreeChildren(
   return rows.map((r) => r.child);
 }
 
-export const GetSpillTreeLevel1API = functions.runWith({ memory: "512MB" }).https.onRequest((request, response) => {
+export const GetSpillTreeLevel1API = functions.runWith({ memory: "256MB" }).https.onRequest((request, response) => {
   cors(request, response, async () => {
     try {
       const q: any = request.method === "GET" ? request.query : request.body;
@@ -5874,7 +5848,7 @@ export const GetSpillTreeLevel1API = functions.runWith({ memory: "512MB" }).http
   });
 });
 
-export const GetSpillTreeLevel2API = functions.runWith({ memory: "512MB" }).https.onRequest((request, response) => {
+export const GetSpillTreeLevel2API = functions.runWith({ memory: "256MB" }).https.onRequest((request, response) => {
   cors(request, response, async () => {
     try {
       const q: any = request.method === "GET" ? request.query : request.body;
@@ -6016,7 +5990,7 @@ export const GetSpillTreeLevel2API = functions.runWith({ memory: "512MB" }).http
   });
 });
 
-export const GetSpillTreeLevel3API = functions.runWith({ memory: "512MB" }).https.onRequest((request, response) => {
+export const GetSpillTreeLevel3API = functions.runWith({ memory: "256MB" }).https.onRequest((request, response) => {
   cors(request, response, async () => {
     try {
       const q: any = request.method === "GET" ? request.query : request.body;
@@ -6210,7 +6184,7 @@ export const GetSpillTreeLevel3API = functions.runWith({ memory: "512MB" }).http
   });
 });
 
-export const GetSpillTreeLevel1To3API = functions.runWith({ memory: "512MB" }).https.onRequest((request, response) => {
+export const GetSpillTreeLevel1To3API = functions.runWith({ memory: "256MB" }).https.onRequest((request, response) => {
   cors(request, response, async () => {
     try {
       const q: any = request.method === "GET" ? request.query : request.body;
@@ -6384,7 +6358,7 @@ export const GetSpillTreeLevel1To3API = functions.runWith({ memory: "512MB" }).h
   });
 });
 
-export const GetSpillTreeLevelCountsAPI = functions.runWith({ memory: "512MB" }).https.onRequest((request, response) => {
+export const GetSpillTreeLevelCountsAPI = functions.runWith({ memory: "256MB" }).https.onRequest((request, response) => {
   cors(request, response, async () => {
     try {
       const q: any = request.method === "GET" ? request.query : request.body;
@@ -6569,7 +6543,7 @@ export const GetUsersCountAPI = functions.runWith({ memory: "512MB" }).https.onR
 });
 
 
-export const CreateStagingNodeAPI = functions.runWith({ memory: "512MB" }).https.onRequest(async (request, response) => {
+export const CreateStagingNodeAPI = functions.runWith({ memory: "256MB" }).https.onRequest(async (request, response) => {
   try {
     await admin.database().ref("staging").update({
       createdAt: Date.now(),
@@ -6583,7 +6557,7 @@ export const CreateStagingNodeAPI = functions.runWith({ memory: "512MB" }).https
   }
 });
 
-export const GetUserByUsernameAPI = functions.runWith({ memory: "512MB" }).https.onRequest((request, response) => {
+export const GetUserByUsernameAPI = functions.runWith({ memory: "256MB" }).https.onRequest((request, response) => {
   cors(request, response, async () => {
     try {
       const q: any = request.method === "GET" ? request.query : request.body;
@@ -6639,7 +6613,7 @@ export const GetUserByUsernameAPI = functions.runWith({ memory: "512MB" }).https
   });
 });
 
-export const CheckUserNameValidityByUserIdAPI = functions.runWith({ memory: "512MB" }).https.onRequest((request, response) => {
+export const CheckUserNameValidityByUserIdAPI = functions.runWith({ memory: "256MB" }).https.onRequest((request, response) => {
   cors(request, response, async () => {
     try {
       const q: any = request.method === "GET" ? request.query : request.body;
@@ -6670,7 +6644,7 @@ export const CheckUserNameValidityByUserIdAPI = functions.runWith({ memory: "512
   });
 });
 
-export const UpdateUserNameByUserIdAPI = functions.runWith({ memory: "512MB" }).https.onRequest((request, response) => {
+export const UpdateUserNameByUserIdAPI = functions.runWith({ memory: "256MB" }).https.onRequest((request, response) => {
   cors(request, response, async () => {
     try {
       const q: any = request.method === "GET" ? request.query : request.body;

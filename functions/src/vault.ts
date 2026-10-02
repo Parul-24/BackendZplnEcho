@@ -1789,9 +1789,31 @@ export async function calculateAllUsersTeamGrowthRewardsForBatch(
   users: Array<{ userId: string; maka: number; cash: number; qualified: boolean; nonQualifiedPreviewMaka: number; nonQualifiedPreviewCash: number }>;
 }> {
   const safeBatchSize = Math.max(1, Math.min(100, Math.floor(Number(batchSize) || 50)));
-  const usersSnap = await admin.database().ref(tournament.Users_DB).once("value");
 
-  if (!usersSnap.exists()) {
+  // Paginate user keys instead of loading all of /Users into memory at once.
+  const userIds: string[] = [];
+  const keyPageSize = 200;
+  let lastKey: string | null = null;
+  while (true) {
+    const keysQuery: admin.database.Query = lastKey
+      ? admin.database().ref(tournament.Users_DB).orderByKey().startAfter(lastKey).limitToFirst(keyPageSize)
+      : admin.database().ref(tournament.Users_DB).orderByKey().limitToFirst(keyPageSize);
+    const keysSnap: admin.database.DataSnapshot = await keysQuery.once("value");
+    if (!keysSnap.exists()) {
+      break;
+    }
+    const pageKeys: string[] = Object.keys(keysSnap.val() || {});
+    if (pageKeys.length === 0) {
+      break;
+    }
+    userIds.push(...pageKeys);
+    lastKey = pageKeys[pageKeys.length - 1];
+    if (pageKeys.length < keyPageSize) {
+      break;
+    }
+  }
+
+  if (userIds.length === 0) {
     return {
       processed: 0,
       totalMaka: 0,
@@ -1802,8 +1824,6 @@ export async function calculateAllUsersTeamGrowthRewardsForBatch(
       users: []
     };
   }
-
-  const userIds = Object.keys(usersSnap.val() || {});
   const users: Array<{ userId: string; maka: number; cash: number; qualified: boolean; nonQualifiedPreviewMaka: number; nonQualifiedPreviewCash: number }> = [];
   let totalMaka = 0;
   let totalCash = 0;
