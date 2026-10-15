@@ -2,6 +2,9 @@
 **/*.js
 **/*.js.map
 
+# Keep one-off scripts (not compiled output)
+!scripts/*.js
+
 # Typescript v1 declaration files
 typings/
 
