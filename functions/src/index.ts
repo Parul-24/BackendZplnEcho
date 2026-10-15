@@ -4353,6 +4353,17 @@ export const ListWithdrawalTokenTypes = functions.runWith({ memory: "256MB" }).h
   res.status(200).json({ tokens: vault.listWithdrawalTokenTypes() });
 });
 
+// MAKA wallet + winner payout stats (read-only reporting; scans all users' subtrees)
+export const GetMakaWinnerStatsAPI = functions.runWith({ timeoutSeconds: 540, memory: "1GB" }).https.onRequest(async (_req, res) => {
+  try {
+    const summary = await vault.computeMakaWinnerStats();
+    res.status(200).json(summary);
+  } catch (err) {
+    console.error("GetMakaWinnerStatsAPI error:", err);
+    res.status(500).json({ error: "Internal Server Error" });
+  }
+});
+
 
 export const GetUserRanksAPI = functions.runWith({ memory: "256MB" }).https.onRequest(async (request, response) => {
   const userId = String(request.query.userId || "");

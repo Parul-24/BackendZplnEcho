@@ -3,6 +3,8 @@ import * as tournament from "./tournament";
 import * as leaderboards from "./leaderboards";
 import * as mailer from "./mailer";
 import * as utils from './utils';
+import axios from 'axios';
+import { appOptions } from "./environments";
 
 import DataSnapshot = admin.database.DataSnapshot;
 
@@ -2966,6 +2968,308 @@ export function listWithdrawalTokenTypes(): { id: number; name: string; network:
     };
   });
 }
+
+//#region MAKA winner / payout stats (read-only reporting)
+
+export interface MakaStatsMonthWindow {
+  key: string;   // "YYYY-MM" (UTC)
+  label: string;
+  start: number;
+  end: number;
+}
+
+const MAKA_STATS_MONTH_NAMES = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+
+/**
+ * Month windows for the MAKA stats report: current month (MTD) + previous 2 months, UTC.
+ */
+export function getMakaStatsMonthWindows(referenceTs?: number): MakaStatsMonthWindow[] {
+  const ref = typeof referenceTs === "number" ? new Date(referenceTs) : new Date();
+  const y = ref.getUTCFullYear();
+  const m = ref.getUTCMonth();
+  const windows: MakaStatsMonthWindow[] = [];
+  for (let back = 2; back >= 0; back--) {
+    const first = new Date(Date.UTC(y, m - back, 1));
+    const next = new Date(Date.UTC(y, m - back + 1, 1));
+    windows.push({
+      key: first.getUTCFullYear() + "-" + ("0" + (first.getUTCMonth() + 1)).slice(-2),
+      label: MAKA_STATS_MONTH_NAMES[first.getUTCMonth()] + " " + first.getUTCFullYear() + (back === 0 ? " (MTD)" : ""),
+      start: first.getTime(),
+      end: next.getTime()
+    });
+  }
+  return windows;
+}
+
+interface MakaStatsWinEntry { ts: number; eventName: string; rank: any; makaCredited: number; }
+interface MakaStatsPayoutEntry { ts: number; amount: number; walletId: string; }
+
+interface MakaStatsUserAggregate {
+  uid: string;
+  userName: string;
+  firstName: string;
+  lastName: string;
+  evmWallet: string | null;
+  wins: MakaStatsWinEntry[];
+  makaPayouts: MakaStatsPayoutEntry[];
+  firstWinTs: number | null;
+  firstMakaPayoutTs: number | null;
+}
+
+async function makaStatsRestGet(baseUrl: string, accessToken: string, p: string, extraParams?: Record<string, string>): Promise<any> {
+  const params: Record<string, string> = { access_token: accessToken };
+  if (extraParams) {
+    for (const k of Object.keys(extraParams)) params[k] = extraParams[k];
+  }
+  let lastErr: any = null;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const res = await axios.get(baseUrl + p + ".json", { params, timeout: 30000 });
+      return res.data;
+    } catch (e) {
+      lastErr = e;
+    }
+  }
+  throw lastErr;
+}
+
+async function makaStatsMapLimit(items: string[], limit: number, fn: (item: string, index: number) => Promise<MakaStatsUserAggregate>): Promise<MakaStatsUserAggregate[]> {
+  const results: MakaStatsUserAggregate[] = new Array(items.length);
+  let i = 0;
+  const workers: Promise<void>[] = [];
+  const workerCount = Math.min(limit, items.length);
+  for (let w = 0; w < workerCount; w++) {
+    workers.push((async () => {
+      while (i < items.length) {
+        const idx = i++;
+        results[idx] = await fn(items[idx], idx);
+        if (idx % 250 === 0) {
+          console.log(`computeMakaWinnerStats: processed ${idx}/${items.length} users`);
+        }
+      }
+    })());
+  }
+  await Promise.all(workers);
+  return results;
+}
+
+/**
+ * MAKA wallet + winner payout report. Read-only.
+ * Scans Users/{uid}/WinningHistory, WithdrawalHistory, wallets, and name fields only
+ * (per-user subtree REST fetches — avoids downloading full /Users payloads).
+ * Payout definition: WithdrawalHistory entries with token "maka" (walletNetwork "evm" also
+ * counts, since MAKA is the only EVM token).
+ */
+export async function computeMakaWinnerStats(): Promise<any> {
+  const baseUrl = String((appOptions as any).databaseURL || "").replace(/\/+$/, "");
+  if (!baseUrl) throw new Error("databaseURL missing in appOptions");
+  const token = await admin.credential.applicationDefault().getAccessToken();
+  const accessToken = token.access_token;
+
+  const keysObj = await makaStatsRestGet(baseUrl, accessToken, "/Users", { shallow: "true" });
+  const uids = Object.keys(keysObj || {});
+  console.log(`computeMakaWinnerStats: ${uids.length} users`);
+
+  const looksEvm = (a: any): boolean => typeof a === "string" && /^0x[a-fA-F0-9]{40}$/.test(a.trim());
+
+  const users = await makaStatsMapLimit(uids, 16, async (uid): Promise<MakaStatsUserAggregate> => {
+    const res = await Promise.all([
+      makaStatsRestGet(baseUrl, accessToken, `/Users/${uid}/WinningHistory`),
+      makaStatsRestGet(baseUrl, accessToken, `/Users/${uid}/WithdrawalHistory`),
+      makaStatsRestGet(baseUrl, accessToken, `/Users/${uid}/wallets`),
+      makaStatsRestGet(baseUrl, accessToken, `/Users/${uid}/userName`),
+      makaStatsRestGet(baseUrl, accessToken, `/Users/${uid}/firstName`),
+      makaStatsRestGet(baseUrl, accessToken, `/Users/${uid}/lastName`)
+    ]);
+    const winning = res[0];
+    const withdrawals = res[1];
+    const wallets = res[2];
+
+    const evmList: string[] = wallets && wallets.evm && wallets.evm.list ? Object.keys(wallets.evm.list) : [];
+    const legacyPrimary = wallets && wallets.primary ? String(wallets.primary) : null;
+    const evmPrimary: string | null =
+      (wallets && wallets.evm && wallets.evm.primary) ||
+      (evmList.length > 0 ? evmList[0] : null) ||
+      (legacyPrimary && looksEvm(legacyPrimary) ? legacyPrimary : null) ||
+      null;
+
+    const wins: MakaStatsWinEntry[] = Object.keys(winning || {}).map((k) => (winning as any)[k])
+      .filter((w: any) => w && typeof w === "object" && w.timestamp)
+      .map((w: any) => ({
+        ts: Number(w.timestamp),
+        eventName: String(w.eventName || ""),
+        rank: w.rank !== undefined ? w.rank : "",
+        makaCredited: Number((w.prizeCredited && (w.prizeCredited.maka !== undefined ? w.prizeCredited.maka : w.prizeCredited[Maka_Vault_User_DB])) || 0)
+      }))
+      .sort((a: MakaStatsWinEntry, b: MakaStatsWinEntry) => a.ts - b.ts);
+
+    const makaPayouts: MakaStatsPayoutEntry[] = Object.keys(withdrawals || {}).map((k) => (withdrawals as any)[k])
+      .filter((x: any) => x && typeof x === "object" && x.timestamp)
+      .filter((x: any) => String(x.token || "").toLowerCase() === "maka" || String(x.walletNetwork || "").toLowerCase() === "evm")
+      .map((x: any) => ({ ts: Number(x.timestamp), amount: Number(x.amount) || 0, walletId: String(x.walletId || "") }))
+      .sort((a: MakaStatsPayoutEntry, b: MakaStatsPayoutEntry) => a.ts - b.ts);
+
+    return {
+      uid,
+      userName: typeof res[3] === "string" ? res[3] : "",
+      firstName: typeof res[4] === "string" ? res[4] : "",
+      lastName: typeof res[5] === "string" ? res[5] : "",
+      evmWallet: evmPrimary,
+      wins,
+      makaPayouts,
+      firstWinTs: wins.length > 0 ? wins[0].ts : null,
+      firstMakaPayoutTs: makaPayouts.length > 0 ? makaPayouts[0].ts : null
+    };
+  });
+
+  // 1. MAKA wallet start date = earliest MAKA payout in DB
+  let makaStart: number | null = null;
+  let makaStartUser: MakaStatsUserAggregate | null = null;
+  for (const u of users) {
+    if (u.firstMakaPayoutTs !== null && (makaStart === null || u.firstMakaPayoutTs < makaStart)) {
+      makaStart = u.firstMakaPayoutTs;
+      makaStartUser = u;
+    }
+  }
+
+  const months = getMakaStatsMonthWindows();
+  const winnerSets: Record<string, Set<string>> = {};
+  const paidSets: Record<string, Set<string>> = {};
+  const monthStats: Record<string, any> = {};
+
+  for (const m of months) {
+    const winners = users.filter((u) => u.wins.some((w) => w.ts >= m.start && w.ts < m.end));
+    const winnerSet = new Set<string>(winners.map((u) => u.uid));
+    winnerSets[m.key] = winnerSet;
+
+    const winnersWithEvm = winners.filter((u) => u.evmWallet);
+    const newEver = winners.filter((u) => u.firstWinTs !== null && u.firstWinTs >= m.start && u.firstWinTs < m.end);
+
+    const paidInMonth = users.filter((u) => u.makaPayouts.some((p) => p.ts >= m.start && p.ts < m.end));
+    const paidSet = new Set<string>(paidInMonth.map((u) => u.uid));
+    paidSets[m.key] = paidSet;
+    const winnersPaid = winners.filter((u) => paidSet.has(u.uid));
+
+    const sumInMonth = (u: MakaStatsUserAggregate): number =>
+      u.makaPayouts.filter((p) => p.ts >= m.start && p.ts < m.end).reduce((a, p) => a + p.amount, 0);
+    const sumMakaAll = paidInMonth.reduce((s, u) => s + sumInMonth(u), 0);
+    const sumMakaWinners = winnersPaid.reduce((s, u) => s + sumInMonth(u), 0);
+
+    // New MAKA wallets proxy: first-ever MAKA payout falls in this month
+    const newMakaWallets = users.filter((u) => u.firstMakaPayoutTs !== null && u.firstMakaPayoutTs >= m.start && u.firstMakaPayoutTs < m.end);
+
+    let winEntries = 0;
+    let makaCreditedToWinners = 0;
+    for (const u of winners) {
+      for (const w of u.wins) {
+        if (w.ts >= m.start && w.ts < m.end) {
+          winEntries++;
+          makaCreditedToWinners += w.makaCredited;
+        }
+      }
+    }
+
+    const payoutsDetail: any[] = [];
+    for (const u of paidInMonth) {
+      for (const p of u.makaPayouts) {
+        if (p.ts >= m.start && p.ts < m.end) {
+          payoutsDetail.push({
+            uid: u.uid,
+            userName: u.userName,
+            firstName: u.firstName,
+            lastName: u.lastName,
+            date: new Date(p.ts).toISOString(),
+            amount: p.amount,
+            walletId: p.walletId,
+            isWinnerThisMonth: winnerSet.has(u.uid)
+          });
+        }
+      }
+    }
+    payoutsDetail.sort((a, b) => (a.date < b.date ? -1 : 1));
+
+    monthStats[m.key] = {
+      month: m.label,
+      window: { start: new Date(m.start).toISOString(), end: new Date(m.end).toISOString() },
+      uniqueWinners: winnerSet.size,
+      winEntries,
+      winnersWithMakaWallet: winnersWithEvm.length,
+      newMakaWalletsCollected_proxyFirstMakaPayout: newMakaWallets.length,
+      winnersPaidMaka: winnersPaid.length,
+      totalUsersPaidMaka: paidInMonth.length,
+      makaPaidToWinners: Number(sumMakaWinners.toFixed(4)),
+      makaPaidTotal_allUsers: Number(sumMakaAll.toFixed(4)),
+      makaCreditedToWinners_viaWins: Number(makaCreditedToWinners.toFixed(4)),
+      newWinners_firstWinEverThisMonth: newEver.length,
+      winnersDetail: winners.map((u) => ({
+        uid: u.uid,
+        userName: u.userName,
+        firstName: u.firstName,
+        lastName: u.lastName,
+        hasEvmWallet: !!u.evmWallet,
+        makaPaidThisMonth: paidSet.has(u.uid),
+        makaPaidAmount: Number(sumInMonth(u).toFixed(4)),
+        firstWinEver: u.firstWinTs !== null ? new Date(u.firstWinTs).toISOString() : null
+      })),
+      payoutsDetail
+    };
+  }
+
+  // 4. New vs previous month (winners and paid users)
+  const newVsPrev: Record<string, any> = {};
+  for (let mi = 1; mi < months.length; mi++) {
+    const cur = months[mi];
+    const prev = months[mi - 1];
+    const curWinners = winnerSets[cur.key] || new Set<string>();
+    const prevWinners = winnerSets[prev.key] || new Set<string>();
+    const curPaid = paidSets[cur.key] || new Set<string>();
+    const prevPaid = paidSets[prev.key] || new Set<string>();
+
+    let newWinners = 0;
+    curWinners.forEach((id) => { if (!prevWinners.has(id)) newWinners++; });
+    let newPaid = 0;
+    curPaid.forEach((id) => { if (!prevPaid.has(id)) newPaid++; });
+    let newPaidVsAllPrior = 0;
+    curPaid.forEach((id) => {
+      let wasPaid = false;
+      for (let pj = 0; pj < mi; pj++) {
+        const prior = paidSets[months[pj].key];
+        if (prior && prior.has(id)) { wasPaid = true; break; }
+      }
+      if (!wasPaid) newPaidVsAllPrior++;
+    });
+
+    newVsPrev[cur.key] = {
+      month: cur.label,
+      comparedTo: prev.label,
+      newWinners_vsPrevMonth: newWinners,
+      returningWinners_vsPrevMonth: curWinners.size - newWinners,
+      newPaid_vsPrevMonth: newPaid,
+      newPaid_vsAllPriorMonths: newPaidVsAllPrior
+    };
+  }
+
+  return {
+    generatedAt: new Date().toISOString(),
+    timezoneBasis: "UTC",
+    payoutDefinition: "WithdrawalHistory entries with token=maka (or walletNetwork=evm)",
+    winnerDefinition: "any WinningHistory entry in the month",
+    newMakaWalletsNote: "proxy = user's first-ever MAKA payout month (wallets node stores no timestamps)",
+    makaWalletStart: makaStart !== null && makaStartUser
+      ? { date: new Date(makaStart).toISOString(), uid: makaStartUser.uid, userName: makaStartUser.userName }
+      : null,
+    totals: {
+      users: users.length,
+      usersWithWins: users.filter((u) => u.wins.length > 0).length,
+      usersWithEvmWallet: users.filter((u) => u.evmWallet).length,
+      usersWithMakaPayouts: users.filter((u) => u.makaPayouts.length > 0).length
+    },
+    months: monthStats,
+    newVsPrev
+  };
+}
+
+//#endregion
 
 
 /**

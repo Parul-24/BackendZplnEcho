@@ -6,3 +6,6 @@
 typings/
 
 node_modules/
+
+# One-off stats script output (contains PII)
+scripts/output/
