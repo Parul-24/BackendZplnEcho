@@ -1242,75 +1242,56 @@ export async function createSponsoredEvent(delayInDays: number, templateOverride
 export async function renewEvent(tour: admin.database.DataSnapshot): Promise<any> {
     const eventType = tour.child("eventType").val();
     const eventName = tour.child("name").val();
-    const eventId = tour.child("eventId").val()
-    console.log("renewEvent: Renew "+eventId+" ("+eventName+") => "+eventType);
+    const eventId = tour.child("eventId").val();
+    console.log("renewEvent: Renew " + eventId + " (" + eventName + ") => " + eventType);
+
+    const isHighScoreEvent = Boolean(tour.child("isHighScoreEvent").val());
+    const isJackpotEvent = Boolean(tour.child("isJackpotEvent").val());
+    const isBrandEvent = Boolean(tour.child("isBrandEvent").val());
+
     switch (eventType) {
         case Event_Types.EGiftOnly:
-            const isJpEvent = Boolean(tour.child("isJackpotEvent").val());
-            if (isJpEvent) {
+            if (isJackpotEvent) {
                 console.log("Reset Jackpot Event");
                 await leaderboards.resetJackpotLeaderboard();
                 return await createTopPlayerEvent(0);
             }
             break;
-        case Event_Types.EGiftAndCredits:
 
-            const isBrandEvent = Boolean(tour.child("isBrandEvent").val());
-            console.log("Renew brand event "+tour.key+": "+isBrandEvent);
-            if (isBrandEvent){
+        case Event_Types.EGiftAndCredits:
+            console.log("Renew brand event " + tour.key + ": " + isBrandEvent);
+            if (isBrandEvent) {
                 const brandLogo = tour.child("brandLogoImage").val();
                 const brandText = tour.child("brandTextImage").val();
-                const prizePackage=  tour.child("brandPrizePackage").val();
-                const newEventId= await createBrandEvent(0,eventName,prizePackage);
-                await addBrandImages(newEventId,brandLogo,brandText);
-                await setCarrouselImage(newEventId,tour.child("carrouselImages"));
+                const prizePackage = tour.child("brandPrizePackage").val();
+                const newEventId = await createBrandEvent(0, eventName, prizePackage);
+                await addBrandImages(newEventId, brandLogo, brandText);
+                await setCarrouselImage(newEventId, tour.child("carrouselImages"));
                 return newEventId;
-
             }
             break;
 
         case Event_Types.CoinsOnly:
-            const isHSEvent = tour.child("isHighScoreEvent").val();
-            console.log(eventId+ " isHighScore "+isHSEvent);
-            if (isHSEvent) {
+            if (isHighScoreEvent) {
                 console.log("Reset HighScore Event");
                 await leaderboards.resetHighScoreLeaderboard();
-                return await createHighScoreEvent(0)
+                return await createHighScoreEvent(0);
             }
-            const isTPEvent = tour.child("isHighScoreEvent").val();
-            console.log(eventId+ " isHighScore "+isHSEvent);
-            if (isTPEvent) {
-                console.log("Reset HighScore Event");
-                await leaderboards.resetJackpotLeaderboard();
-                return await createTopPlayerEvent(0)
-            }
-/*
-            const isAuEvent = tour.child("isAudienceEvent").val();
-            console.log(eventId+ " isAudience "+isAuEvent);
-            if (isAuEvent){
-                console.log("Reset Audience Event");
-                await leaderboards.resetAudienceLeaderboard();
-                return await createAudienceEvent(0)
-            }*/
-            console.log("Reset Zpln Event")
-            /*const zplnIndex = tour.child("zplnIndex").val();
-            const img = ZplnEventsImages[zplnIndex];
-            const images = {
-                sponsorLogo: img,
-                prizeScreen: img,
-                postgameScreen: img,
-                posteventScreen: img,
-                prizeImage: img,
-                backgroundImage: BackgroundImages[zplnIndex]
-            };
-            return await createZplnEvent(0,"Zpln Event", images, zplnIndex);
-            */
 
-            return await createCoinsOnlyEvent(0,eventName,DefaultNumberOfPrizes,
-                tour.toJSON());
+            if (isJackpotEvent) {
+                console.log("Reset Top Player Event (jackpot flag)");
+                await leaderboards.resetJackpotLeaderboard();
+                return await createTopPlayerEvent(0);
+            }
+
+            console.log("Reset Zpln Event");
+            return await createCoinsOnlyEvent(0, eventName, DefaultNumberOfPrizes, tour.toJSON());
+
         case Event_Types.CoinAndCredits:
             return await createDailyEvent(0);
     }
+
+    return null;
 }
 
 

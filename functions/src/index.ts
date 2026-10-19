@@ -880,6 +880,44 @@ function normalizeDateValue(value: unknown): number | null {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
 }
 
+const MEMBERSHIP_TYPE_FREE = "free";
+const MEMBERSHIP_TYPE_PAID = "paid";
+
+function asBoolean(value: unknown): boolean {
+  if (value === true || value === false) return value;
+  if (value === undefined || value === null) return false;
+
+  const normalized = String(value).trim().toLowerCase();
+  return normalized === "1" || normalized === "true" || normalized === "yes" || normalized === "y";
+}
+
+function normalizeMembershipType(value: unknown, fallback: string = MEMBERSHIP_TYPE_FREE): string {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (normalized === MEMBERSHIP_TYPE_PAID || normalized === "pro" || normalized === "echopro") {
+    return MEMBERSHIP_TYPE_PAID;
+  }
+  if (normalized === MEMBERSHIP_TYPE_FREE || normalized === "basic") {
+    return MEMBERSHIP_TYPE_FREE;
+  }
+  return fallback;
+}
+
+function deriveMembershipFromUserNode(userNode: Record<string, unknown> | null | undefined): { membershipType: string; isEchoPro: boolean } {
+  const requestedType = normalizeMembershipType(userNode?.[userUtils.FieldMembershipType], "");
+  if (requestedType) {
+    return {
+      membershipType: requestedType,
+      isEchoPro: requestedType === MEMBERSHIP_TYPE_PAID
+    };
+  }
+
+  const isEchoPro = userNode?.[userUtils.FieldIsEchoPro] === true;
+  return {
+    membershipType: isEchoPro ? MEMBERSHIP_TYPE_PAID : MEMBERSHIP_TYPE_FREE,
+    isEchoPro
+  };
+}
+
 function isFallbackInviteLink(inviteLink: string): boolean {
   const raw = String(inviteLink || "").trim();
   if (!raw) return false;
@@ -912,7 +950,8 @@ function isExpectedInviteLinkFormat(inviteLink: string): boolean {
 
   if (parsed.protocol !== "https:") return false;
   if (parsed.hostname === new URL(utils.ECHO_PRO_BASE_URL).hostname) {
-    return !parsed.search && !parsed.hash && /^\/[A-Za-z0-9]{8}$/.test(parsed.pathname);
+    const expectedPath = `/${utils.ECHO_PRO_INVITE_ROUTE}/[A-Za-z0-9]{8}`;
+    return !parsed.search && !parsed.hash && new RegExp(`^${expectedPath}$`).test(parsed.pathname);
   }
   if (parsed.hostname !== "t5sgz.app.link") return false;
   if ((parsed.search || "").length > 0) return false;
@@ -971,6 +1010,7 @@ export const NormalizeFreeUserAPI = functions.runWith({ memory: "256MB" }).https
     );
 
     const createdAt = normalizeDateValue(data.createdAt) ?? normalizeDateValue(current.createdAt) ?? Date.now();
+    const currentMembership = deriveMembershipFromUserNode(current);
 
     const updates: Record<string, unknown> = {
       userId,
@@ -984,7 +1024,9 @@ export const NormalizeFreeUserAPI = functions.runWith({ memory: "256MB" }).https
       parentUid,
       parentId,
       createdAt,
-      isEchoPro: current.isEchoPro === true,
+      isEchoPro: currentMembership.isEchoPro,
+      [userUtils.FieldMembershipType]: currentMembership.membershipType,
+      [userUtils.FieldMembershipUpdatedAt]: Date.now(),
       joinFromEcho: current.joinFromEcho === true || (legacyEchoUser !== null && legacyEchoUser.exists()),
       level: 1,
       levelName: "Player",
@@ -1028,6 +1070,7 @@ export const NormalizeFreeUserAPI = functions.runWith({ memory: "256MB" }).https
 
     const refreshed = await userRef.once("value");
     const normalized = refreshed.val() || {};
+    const normalizedMembership = deriveMembershipFromUserNode(normalized);
 
     response.status(200).json({
       success: true,
@@ -1037,7 +1080,8 @@ export const NormalizeFreeUserAPI = functions.runWith({ memory: "256MB" }).https
       user: {
         email: normalized.email || "",
         firstName: normalized.firstName || "",
-        isEchoPro: Boolean(normalized.isEchoPro),
+        isEchoPro: normalizedMembership.isEchoPro,
+        membershipType: normalizedMembership.membershipType,
         joinFromEcho: Boolean(normalized.joinFromEcho),
         lastName: normalized.lastName || "",
         parentInviteCode: normalized.parentInviteCode || "",
@@ -1057,6 +1101,126 @@ export const NormalizeFreeUserAPI = functions.runWith({ memory: "256MB" }).https
     });
   } catch (error) {
     console.error("NormalizeFreeUserAPI error:", error);
+    response.status(500).json({ error: String(error) });
+  }
+});
+
+export const NormalizeAllUsersForEchoWebAPI = functions.runWith({ timeoutSeconds: 540, memory: "1GB" }).https.onRequest(async (request, response) => {
+  try {
+    const data = getRequestData(request);
+    const confirm = firstNonEmpty(data.confirm, data.action);
+    const dryRun = String(firstNonEmpty(data.dryRun, "true")).toLowerCase() === "true";
+    const removeEchoUsers = String(firstNonEmpty(data.removeEchoUsers, "false")).toLowerCase() === "true";
+
+    if (confirm !== "NORMALIZE_ECHO_WEB_USERS") {
+      response.status(400).json({
+        error: "Missing confirmation token",
+        requiredConfirmValue: "NORMALIZE_ECHO_WEB_USERS"
+      });
+      return;
+    }
+
+    const [usersSnap, echoUsersSnap] = await Promise.all([
+      admin.database().ref(tournament.Users_DB).once("value"),
+      admin.database().ref("EchoUsers").once("value")
+    ]);
+
+    const users = usersSnap.val() || {};
+    const echoUserIds = new Set<string>();
+
+    if (echoUsersSnap.exists()) {
+      echoUsersSnap.forEach((child) => {
+        if (child.key) {
+          echoUserIds.add(String(child.key));
+        }
+        return false;
+      });
+    }
+
+    const summary = {
+      dryRun,
+      removeEchoUsers,
+      scannedUsers: 0,
+      patchedUsers: 0,
+      inviteRegeneratedUsers: 0,
+      failedUsers: 0,
+      echoUsersCount: echoUserIds.size,
+      removedEchoUsers: 0
+    };
+
+    const samples: Array<{ userId: string; membershipType: string; isEchoPro: boolean; joinFromEcho: boolean; inviteCode: string; inviteLink: string }> = [];
+    const dbUpdates: Record<string, unknown> = {};
+
+    for (const userId of Object.keys(users)) {
+      summary.scannedUsers += 1;
+
+      try {
+        const userNode = users[userId] || {};
+        const membership = deriveMembershipFromUserNode(userNode);
+        const joinFromEcho = userNode.joinFromEcho === true || echoUserIds.has(userId);
+        const parentUid = firstNonEmpty(userNode.parentUid, userNode.parentId);
+
+        const patch: Record<string, unknown> = {
+          userId,
+          parentUid,
+          parentId: parentUid,
+          parentInviteCode: firstNonEmpty(userNode.parentInviteCode),
+          joinFromEcho,
+          [userUtils.FieldIsEchoPro]: membership.isEchoPro,
+          [userUtils.FieldMembershipType]: membership.membershipType,
+          [userUtils.FieldMembershipUpdatedAt]: Date.now()
+        };
+
+        if (!dryRun) {
+          await admin.database().ref(`${tournament.Users_DB}/${userId}`).update(patch);
+          await audience.createInviteCodeIfDoesntAlreadyExists(userId);
+        }
+
+        summary.patchedUsers += 1;
+        summary.inviteRegeneratedUsers += 1;
+
+        if (samples.length < 50) {
+          const normalizedSnapshot = dryRun
+            ? null
+            : await admin.database().ref(`${tournament.Users_DB}/${userId}`).once("value");
+
+          const inviteCode = dryRun
+            ? firstNonEmpty(userNode.inviteCode)
+            : firstNonEmpty(normalizedSnapshot?.child(audience.FieldInviteCode).val());
+          const inviteLink = dryRun
+            ? firstNonEmpty(userNode.inviteLink)
+            : firstNonEmpty(normalizedSnapshot?.child(audience.FieldInviteLink).val());
+
+          samples.push({
+            userId,
+            membershipType: membership.membershipType,
+            isEchoPro: membership.isEchoPro,
+            joinFromEcho,
+            inviteCode,
+            inviteLink
+          });
+        }
+      } catch (error) {
+        summary.failedUsers += 1;
+        console.error("NormalizeAllUsersForEchoWebAPI failed for user:", userId, error);
+      }
+    }
+
+    if (!dryRun && removeEchoUsers && echoUserIds.size > 0) {
+      for (const userId of echoUserIds) {
+        dbUpdates[`EchoUsers/${userId}`] = null;
+      }
+      await admin.database().ref().update(dbUpdates);
+      summary.removedEchoUsers = echoUserIds.size;
+    }
+
+    response.status(200).json({
+      success: true,
+      summary,
+      samples
+    });
+  } catch (error) {
+    console.error("NormalizeAllUsersForEchoWebAPI error:", error);
     response.status(500).json({ error: String(error) });
   }
 });
@@ -2028,6 +2192,40 @@ export const GetHighScoreLeaderboard = functions.runWith({ memory: "256MB" }).ht
     return response.send(result)
   }).catch(() => { response.send("Error"); return; });
 
+});
+
+export const GetTop5PlayersAPI = functions.runWith({ memory: "256MB" }).https.onRequest(async (request, response) => {
+  try {
+    const q: any = request.method === "GET" ? request.query : request.body;
+    const requestedLimit = Number(q.limit || 10);
+    const limit = Math.max(1, Math.min(10, Number.isFinite(requestedLimit) ? requestedLimit : 10));
+    const userId = q.userId ? String(q.userId) : null;
+
+    const players = await leaderboards.getHighScoreLeaderboard(userId, limit);
+
+    const normalizedPlayers = players.slice(0, limit).map((player: any, index: number) => ({
+      rank: index + 1,
+      userId: player.id || player.userId || player.uid || null,
+      userName: player.userName || player.name || "",
+      firstName: player.firstName || "",
+      lastName: player.lastName || "",
+      score: Number(player.HighScore || player.highScore || player.score || 0),
+      globalAverage: Number(player.globalAverage || 0),
+      avatar: player.SavedAvatarURL || player.savedAvatarURL || "",
+      raw: player
+    }));
+
+    response.status(200).json({
+      success: true,
+      action: "GetTop5PlayersAPI",
+      limit,
+      total: normalizedPlayers.length,
+      players: normalizedPlayers
+    });
+  } catch (error) {
+    console.error("GetTop5PlayersAPI error:", error);
+    response.status(500).json({ error: "Internal Server Error" });
+  }
 });
 
 export const GetEventLeaderboard = functions.runWith({ memory: "256MB" }).https.onRequest(
@@ -4404,6 +4602,91 @@ export const GetUserRanksAPI = functions.runWith({ memory: "256MB" }).https.onRe
   }
 });
 
+export const PlayercardAPI = functions.runWith({ memory: "256MB" }).https.onRequest(async (request, response) => {
+  cors(request, response, async () => {
+    try {
+      const q: any = request.method === "GET" ? request.query : request.body;
+      const userId = String(q.userId || q.uid || "").trim();
+
+      if (!userId) {
+        return response.status(400).json({ error: "Missing userId" });
+      }
+
+      const userSnap = await admin.database().ref(`${tournament.Users_DB}/${userId}`).once("value");
+      if (!userSnap.exists()) {
+        return response.status(404).json({ error: "User not found", userId });
+      }
+
+      const firstName = String(userSnap.child("firstName").val() || "").trim();
+      const lastName = String(userSnap.child("lastName").val() || "").trim();
+      const userName = String(userSnap.child("userName").val() || "").trim() || `${firstName} ${lastName}`.trim() || userId;
+      const globalAverage = Number(userSnap.child("globalAverage").val() || 0);
+      const playRankEnum = await vault.getPlayRankForUser(userId);
+      const playRankName = playRankEnum !== null ? vault.determinePlayRankNameFromAverage(globalAverage) : "Celestial";
+
+      const miningRankEnum = Number(userSnap.child(`${vault.Vault_User_DB}/${vault.MiningRank_Vault_User_DB}`).val() || 1);
+      const miningRankName = vault.getMiningRankDisplayName(miningRankEnum);
+
+      const parentUid = String(userSnap.child("parentUid").val() || userSnap.child("parentId").val() || "").trim();
+      let parent: { userId: string; firstName: string; lastName: string; userName: string; fullName: string } | null = null;
+
+      if (parentUid) {
+        const parentSnap = await admin.database().ref(`${tournament.Users_DB}/${parentUid}`).once("value");
+        if (parentSnap.exists()) {
+          const parentFirstName = String(parentSnap.child("firstName").val() || "").trim();
+          const parentLastName = String(parentSnap.child("lastName").val() || "").trim();
+          const parentUserName = String(parentSnap.child("userName").val() || "").trim();
+          const parentFullName = `${parentFirstName} ${parentLastName}`.trim() || parentUserName || parentUid;
+          parent = {
+            userId: parentUid,
+            firstName: parentFirstName,
+            lastName: parentLastName,
+            userName: parentUserName,
+            fullName: parentFullName
+          };
+        }
+      }
+
+      const directChildrenSnapshot = await admin.database().ref(`${tournament.Users_DB}`).orderByChild("parentUid").equalTo(userId).once("value");
+      const directChildrenCount = directChildrenSnapshot.exists() ? directChildrenSnapshot.numChildren() : 0;
+      const qualified = directChildrenCount >= 5;
+
+      const membership = deriveMembershipFromUserNode(userSnap.val() || {});
+
+      return response.status(200).json({
+        success: true,
+        userId,
+        username: userName,
+        firstName,
+        lastName,
+        playRank: {
+          enum: playRankEnum ?? 1,
+          name: playRankName
+        },
+        miningRank: {
+          enum: miningRankEnum,
+          name: miningRankName
+        },
+        qualified,
+        isEchoPro: membership.isEchoPro,
+        isEchoProMember: membership.isEchoPro,
+        membershipType: membership.membershipType,
+        parent: parent ? {
+          userId: parent.userId,
+          firstName: parent.firstName,
+          lastName: parent.lastName,
+          userName: parent.userName,
+          fullName: parent.fullName
+        } : null
+      });
+    } catch (error) {
+      console.error("PlayercardAPI error:", error);
+      return response.status(500).json({ error: "Internal Server Error" });
+    }
+  });
+});
+
+export const PlayerCardAPI = PlayercardAPI;
 
 // export const ListUsersWithWithdrawalHistory = functions.https.onRequest(async (request, response) => {
 //   try {
@@ -4807,7 +5090,8 @@ export const GetEchoProInviteCounter = functions.runWith({ memory: "256MB" }).ht
 export const GetEchoProReferrerInfo = functions.runWith({ memory: "256MB" }).https.onRequest((request, response) => {
   cors(request, response, async () => {
     try {
-      const code = String(request.query.code || "").trim();
+      const data = getRequestData(request);
+      const code = normalizeInviteCodeCandidate(firstNonEmpty(data.code, data.inviteCode, data.parentInviteCode, data.link, data.url));
 
       if (!code) {
         return response.status(400).json({ error: "Missing code" });
@@ -4860,17 +5144,23 @@ export const GetEchoProReferrerInfo = functions.runWith({ memory: "256MB" }).htt
 export const RegisterEchoProUserAPI = functions.runWith({ memory: "256MB" }).https.onRequest((request, response) => {
   cors(request, response, async () => {
     try {
-      const q: any = request.method === "GET" ? request.query : request.body;
+      const q = getRequestData(request);
 
-      const userId = String(q.userId || "").trim();
-      const phone = String(q.phone || "").trim();
-      const idToken = String(q.idToken || "").trim();
-      const firstName = String(q.firstName || "").trim();
-      const lastName = String(q.lastName || "").trim();
-      const email = String(q.email || "").trim();
-      const parentInviteCode = normalizeInviteCodeCandidate(q.parentInviteCode) || utils.ECHO_PRO_CORPORATE_INVITE_CODE;
-      const savedAvatarURL = String(q.savedAvatarURL || "").trim();
+      const userId = firstNonEmpty(q.userId);
+      const phone = firstNonEmpty(q.phone);
+      const idToken = firstNonEmpty(q.idToken);
+      const firstName = firstNonEmpty(q.firstName);
+      const lastName = firstNonEmpty(q.lastName);
+      const email = firstNonEmpty(q.email);
+      const parentInviteCode = normalizeInviteCodeCandidate(firstNonEmpty(q.parentInviteCode, q.inviteCode, q.code, q.inviteLink, q.link, q.url));
+      const savedAvatarURL = firstNonEmpty(q.savedAvatarURL, q.SavedAvatarURL);
       const userName = `${firstName} ${lastName}`.trim();
+      const explicitMembershipType = firstNonEmpty(q.membershipType, q.planType);
+      const inferredMembershipType = (asBoolean(q.isEchoPro) || asBoolean(q.isPaid))
+        ? MEMBERSHIP_TYPE_PAID
+        : MEMBERSHIP_TYPE_FREE;
+      const membershipType = normalizeMembershipType(explicitMembershipType, inferredMembershipType);
+      const isEchoPro = membershipType === MEMBERSHIP_TYPE_PAID;
 
       if (!userId) return response.status(400).json({ error: "Missing userId" });
       if (!phone) return response.status(400).json({ error: "Missing phone" });
@@ -4878,6 +5168,7 @@ export const RegisterEchoProUserAPI = functions.runWith({ memory: "256MB" }).htt
       if (!firstName) return response.status(400).json({ error: "Missing firstName" });
       if (!lastName) return response.status(400).json({ error: "Missing lastName" });
       if (!email) return response.status(400).json({ error: "Missing email" });
+      if (!parentInviteCode) return response.status(400).json({ error: "Missing invite link/code. Registration is invite-only." });
 
       let authUser;
       try {
@@ -4897,6 +5188,10 @@ export const RegisterEchoProUserAPI = functions.runWith({ memory: "256MB" }).htt
       const parentUid = await audience.getParentUidFromParentCode(parentInviteCode);
       if (!parentUid) {
         return response.status(400).json({ error: "Invalid Echo Pro invite code" });
+      }
+
+      if (!await audience.canInviteCodeBeRedeemed(parentInviteCode)) {
+        return response.status(400).json({ error: "Invite code cannot be redeemed right now" });
       }
 
       // Optional: enforce parent invite limit before creating user
@@ -4926,7 +5221,9 @@ await admin.database().ref(`${tournament.Users_DB}/${userId}`).update({
   parentId: parentUid,
   parentInviteCode,
   joinFromEcho: true,
-  [userUtils.FieldIsEchoPro]: false,
+  [userUtils.FieldIsEchoPro]: isEchoPro,
+  [userUtils.FieldMembershipType]: membershipType,
+  [userUtils.FieldMembershipUpdatedAt]: Date.now(),
   [`${userUtils.FieldEcho}/${userUtils.FieldEchoParentInviteCounter}`]: 0
 });
 
@@ -4962,7 +5259,8 @@ await admin.database().ref(`${tournament.Users_DB}/${userId}`).update({
       return response.status(200).json({
         success: true,
         userId,
-        isEchoPro: false,
+        isEchoPro,
+        membershipType,
         joinFromEcho: true,
         inviteCode: gameInviteCode,
         inviteLink: gameInviteLink,
@@ -5051,13 +5349,16 @@ export const ValidateEchoProPhoneForRegistration = functions.runWith({ memory: "
 
     const userSnap = await admin.database().ref(`${tournament.Users_DB}/${existingUid}`).once("value");
     const existsInDb = userSnap.exists();
-    const isEchoPro = existsInDb ? userSnap.child(userUtils.FieldIsEchoPro).val() === true : false;
+    const membership = existsInDb
+      ? deriveMembershipFromUserNode(userSnap.val() || {})
+      : { membershipType: MEMBERSHIP_TYPE_FREE, isEchoPro: false };
 
     response.status(200).json({
       exists: existsInAuth || existsInDb,
       existsInAuth,
       existsInDb,
-      isEchoPro,
+      isEchoPro: membership.isEchoPro,
+      membershipType: membership.membershipType,
       userId: existingUid,
       nextAction: "LOGIN",
       message: "Phone already exists. Please login instead of registering."
@@ -5192,7 +5493,17 @@ export const LoginEchoProUserAPI = functions.runWith({ memory: "256MB" }).https.
       }
 
       await audience.createInviteCodeIfDoesntAlreadyExists(uid);
-      const user = (await userSnap.ref.once("value")).val() || {};
+      const refreshedSnapshot = await userSnap.ref.once("value");
+      const user = refreshedSnapshot.val() || {};
+      const membership = deriveMembershipFromUserNode(user);
+
+      if (!refreshedSnapshot.child(userUtils.FieldMembershipType).exists()) {
+        await refreshedSnapshot.ref.update({
+          [userUtils.FieldMembershipType]: membership.membershipType,
+          [userUtils.FieldMembershipUpdatedAt]: Date.now(),
+          [userUtils.FieldIsEchoPro]: membership.isEchoPro
+        });
+      }
 
       // 4) Update last login timestamp
       await userSnap.ref.child("lastLoginAt").set(Date.now());
@@ -5201,7 +5512,8 @@ export const LoginEchoProUserAPI = functions.runWith({ memory: "256MB" }).https.
         success: true,
         userId: uid,
         phone: authPhone,
-        isEchoPro: user.isEchoPro === true,
+        isEchoPro: membership.isEchoPro,
+        membershipType: membership.membershipType,
         joinFromEcho: user.joinFromEcho === true,
         data: user
       });
@@ -5336,6 +5648,59 @@ export const DeleteAllUsersExceptEchoProAPI = functions.runWith({
   }
 });
 
+export const UserInitialDataAPI = functions.runWith({ memory: "256MB" }).https.onRequest((request, response) => {
+  cors(request, response, async () => {
+    try {
+      const q: any = request.method === "GET" ? request.query : request.body;
+      const userId = String(q.userId || q.uid || "").trim();
+
+      if (!userId) {
+        return response.status(400).json({ error: "Missing userId" });
+      }
+
+      const userRef = admin.database().ref(`${tournament.Users_DB}/${userId}`);
+      const userSnap = await userRef.once("value");
+
+      if (!userSnap.exists()) {
+        return response.status(404).json({
+          success: false,
+          error: "User not found",
+          userId
+        });
+      }
+
+      const requiredFields = ["firstName", "lastName", "email"] as const;
+      const presentFields: Record<string, string> = {};
+      const missingFields: string[] = [];
+
+      for (const field of requiredFields) {
+        const value = String(userSnap.child(field).val() || "").trim();
+        if (value) {
+          presentFields[field] = value;
+        } else {
+          missingFields.push(field);
+        }
+      }
+
+      return response.status(200).json({
+        success: true,
+        isComplete: missingFields.length === 0,
+        userId,
+        requiredFields,
+        presentFields,
+        missingFields,
+        message: missingFields.length > 0
+          ? `Missing profile fields: ${missingFields.join(", ")}`
+          : "All required profile fields are present"
+      });
+    } catch (error) {
+      console.error("UserInitialDataAPI error:", error);
+      return response.status(500).json({ error: "Internal Server Error" });
+    }
+  });
+});
+
+export const GetUserInitialDataAPI = UserInitialDataAPI;
 
 export const WalletElliglebleAPI = functions.runWith({ memory: "256MB" }).https.onRequest((request, response) => {
   cors(request, response, async () => {

@@ -220,6 +220,32 @@ export async function resetAndRegenerateFreeInviteForUser(userId: string): Promi
     const oldInviteCode = asStringOrEmpty(snapshot.child(FieldInviteCode).val());
     const oldInviteLink = asStringOrEmpty(snapshot.child(FieldInviteLink).val());
 
+    if (oldInviteCode) {
+        await Promise.all([
+            admin.database().ref(`${FieldInviteCodesDB}/${oldInviteCode}`).remove(),
+            admin.database().ref(`EchoProInviteCodes/${oldInviteCode}`).remove(),
+            admin.database().ref(`${FieldInviteCodeRegistryDB}/${oldInviteCode}`).set({
+                userId,
+                type: "invite_retired",
+                retiredAt: Date.now()
+            })
+        ]);
+    }
+
+    if (oldInviteLink) {
+        const shortLinkInviteCode = getCodeFromInviteLink(oldInviteLink);
+        if (shortLinkInviteCode) {
+            await admin.database().ref(`${FieldShortlinkCodesDB}/${shortLinkInviteCode}`).remove();
+        }
+    }
+
+    await userRef.update({
+        [FieldInviteCode]: null,
+        [FieldInviteLink]: null,
+        [`${userUtils.FieldEcho}/${userUtils.FieldEchoProInviteCode}`]: null,
+        [`${userUtils.FieldEcho}/${userUtils.FieldEchoProInviteLink}`]: null
+    });
+
     await createInviteCodeIfDoesntAlreadyExists(userId);
 
     const refreshed = await userRef.once("value");

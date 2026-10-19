@@ -49,6 +49,8 @@ export const TutorialFields = {
 
 //Echo Pro Users
 export const FieldIsEchoPro = "isEchoPro";
+export const FieldMembershipType = "membershipType";
+export const FieldMembershipUpdatedAt = "membershipUpdatedAt";
 export const FieldEcho = "Echo";
 export const FieldEchoProInviteCode = "echoProInviteCode";
 export const FieldEchoProInviteLink = "echoProInviteLink";

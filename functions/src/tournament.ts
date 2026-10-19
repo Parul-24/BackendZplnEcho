@@ -350,8 +350,11 @@ export function IsExhibitionAlphaEvent(tournament: DataSnapshot): boolean {
 }
 
 function hasRenewal(tournament: DataSnapshot): boolean {
-  const renewal = Boolean(tournament.child("autoRenewal").val());
-  return renewal;
+  // Ignore the autoRenewal gate for now and always renew completed events.
+  // This keeps the event cycle working even when older events were created with
+  // autoRenewal set to false.
+  console.log("hasRenewal override: forcing renewal for " + tournament.key);
+  return true;
 }
 
 async function endedTournament(tournament: DataSnapshot): Promise<boolean> {

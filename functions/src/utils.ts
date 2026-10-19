@@ -660,8 +660,9 @@ export function getSecondsSinceStartOfDayPST(): number {
 // ...existing code...
 
 export const ECHO_PRO_BASE_URL = "https://echopro.vip"; //"https://zpln-3be94.web.app";
+export const ECHO_PRO_INVITE_ROUTE = "join";
 export const ECHO_PRO_CORPORATE_INVITE_CODE = "A8K3M9Q2";
-export const ECHO_PRO_CORPORATE_INVITE_LINK = `${ECHO_PRO_BASE_URL}/${ECHO_PRO_CORPORATE_INVITE_CODE}`;
+export const ECHO_PRO_CORPORATE_INVITE_LINK = `${ECHO_PRO_BASE_URL}/${ECHO_PRO_INVITE_ROUTE}/${ECHO_PRO_CORPORATE_INVITE_CODE}`;
 
 /**
  * Generates Echo Pro invite code using user initials + random chars
@@ -679,6 +680,6 @@ export function generateEchoProInviteCode(firstName: string, lastName: string): 
 }
 
 export function generateEchoProInviteLink(inviteCode: string): string {
-  return `${ECHO_PRO_BASE_URL}/${inviteCode}`;
+    return `${ECHO_PRO_BASE_URL}/${ECHO_PRO_INVITE_ROUTE}/${inviteCode}`;
 }
 
