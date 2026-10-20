@@ -2194,40 +2194,6 @@ export const GetHighScoreLeaderboard = functions.runWith({ memory: "256MB" }).ht
 
 });
 
-export const GetTop5PlayersAPI = functions.runWith({ memory: "256MB" }).https.onRequest(async (request, response) => {
-  try {
-    const q: any = request.method === "GET" ? request.query : request.body;
-    const requestedLimit = Number(q.limit || 10);
-    const limit = Math.max(1, Math.min(10, Number.isFinite(requestedLimit) ? requestedLimit : 10));
-    const userId = q.userId ? String(q.userId) : null;
-
-    const players = await leaderboards.getHighScoreLeaderboard(userId, limit);
-
-    const normalizedPlayers = players.slice(0, limit).map((player: any, index: number) => ({
-      rank: index + 1,
-      userId: player.id || player.userId || player.uid || null,
-      userName: player.userName || player.name || "",
-      firstName: player.firstName || "",
-      lastName: player.lastName || "",
-      score: Number(player.HighScore || player.highScore || player.score || 0),
-      globalAverage: Number(player.globalAverage || 0),
-      avatar: player.SavedAvatarURL || player.savedAvatarURL || "",
-      raw: player
-    }));
-
-    response.status(200).json({
-      success: true,
-      action: "GetTop5PlayersAPI",
-      limit,
-      total: normalizedPlayers.length,
-      players: normalizedPlayers
-    });
-  } catch (error) {
-    console.error("GetTop5PlayersAPI error:", error);
-    response.status(500).json({ error: "Internal Server Error" });
-  }
-});
-
 export const GetEventLeaderboard = functions.runWith({ memory: "256MB" }).https.onRequest(
   async (request, response) => {
 
@@ -3134,12 +3100,12 @@ export const GetMyTop5Players = functions.runWith({ memory: "256MB" }).https.onR
   }
 
   try {
-    const result = await vault.getTopPlayersInSpillTreeByMiningRank(userId, 3, 5);
+    const result = await vault.getTopPlayersInSpillTreeByMiningRank(userId, 3, 10);
     response.status(200).json({
       Action: "GetMyTop5Players",
       UserId: userId,
       MaxLevel: 3,
-      Limit: 5,
+      Limit: 10,
       TotalCandidates: result.totalCandidates,
       Players: result.players
     });
