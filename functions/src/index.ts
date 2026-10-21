@@ -5668,6 +5668,92 @@ export const UserInitialDataAPI = functions.runWith({ memory: "256MB" }).https.o
 
 export const GetUserInitialDataAPI = UserInitialDataAPI;
 
+// Fills in missing profile fields only; fields that already have a value are never overwritten.
+export const UpdateUserInitialDataAPI = functions.runWith({ memory: "256MB" }).https.onRequest((request, response) => {
+  cors(request, response, async () => {
+    try {
+      const q: any = request.method === "GET" ? request.query : request.body;
+      const userId = String(q.userId || q.uid || "").trim();
+
+      if (!userId) {
+        return response.status(400).json({ error: "Missing userId" });
+      }
+
+      const userRef = admin.database().ref(`${tournament.Users_DB}/${userId}`);
+      const userSnap = await userRef.once("value");
+
+      if (!userSnap.exists()) {
+        return response.status(404).json({
+          success: false,
+          error: "User not found",
+          userId
+        });
+      }
+
+      const updatableFields = ["firstName", "lastName", "userName", "email"] as const;
+      const updates: Record<string, string> = {};
+      const skippedFields: string[] = [];
+
+      for (const field of updatableFields) {
+        const incoming = q[field] !== undefined && q[field] !== null ? String(q[field]).trim() : "";
+        if (!incoming) continue;
+
+        const existing = String(userSnap.child(field).val() || "").trim();
+        if (existing) {
+          skippedFields.push(field);
+          continue;
+        }
+        updates[field] = incoming;
+      }
+
+      if (updates.email !== undefined) {
+        updates.email = updates.email.toLowerCase();
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(updates.email)) {
+          return response.status(400).json({ success: false, error: "Invalid email format", userId });
+        }
+      }
+
+      if (updates.userName !== undefined) {
+        const nameCheck: any = await utils.checkUserName(updates.userName, null);
+        if (nameCheck.exists !== 0 && nameCheck.userId && nameCheck.userId !== userId) {
+          return response.status(409).json({ success: false, error: "Username already taken", userId });
+        }
+      }
+
+      if (Object.keys(updates).length > 0) {
+        await userRef.update(updates);
+      }
+
+      const presentFields: Record<string, string> = {};
+      const missingFields: string[] = [];
+      for (const field of updatableFields) {
+        const value = updates[field] !== undefined ? updates[field] : String(userSnap.child(field).val() || "").trim();
+        if (value) {
+          presentFields[field] = value;
+        } else {
+          missingFields.push(field);
+        }
+      }
+
+      return response.status(200).json({
+        success: true,
+        userId,
+        updatedFields: Object.keys(updates),
+        skippedFields,
+        presentFields,
+        missingFields,
+        isComplete: missingFields.length === 0,
+        message: Object.keys(updates).length > 0
+          ? `Updated fields: ${Object.keys(updates).join(", ")}`
+          : "No missing fields were updated"
+      });
+    } catch (error) {
+      console.error("UpdateUserInitialDataAPI error:", error);
+      return response.status(500).json({ error: "Internal Server Error" });
+    }
+  });
+});
+
 export const WalletElliglebleAPI = functions.runWith({ memory: "256MB" }).https.onRequest((request, response) => {
   cors(request, response, async () => {
     try {
