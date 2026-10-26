@@ -29,6 +29,7 @@ import { Users_DB } from "./tournament";
 import { createDynamicLinkForInviteCode } from "./dynamic_links_handler";
 import { getCodeFromInviteLink } from "./utils";
 import { getInviteCodeFromShortlinkInviteCode } from "./audience";
+import { countDirectChildrenFromValue } from "./player_card_utils";
 const { normalizeInviteCodeCandidate, extractParentInviteCodeCandidateFromRequestData } = require("./invite_link_utils");
 import * as analytics_apis from "./analytics_apis";
 import * as ingame_popups from "./ingame_popups";
@@ -4568,7 +4569,7 @@ export const GetUserRanksAPI = functions.runWith({ memory: "256MB" }).https.onRe
   }
 });
 
-export const PlayercardAPI = functions.runWith({ memory: "256MB" }).https.onRequest(async (request, response) => {
+export const PlayerCardAPI = functions.runWith({ memory: "512MB" }).https.onRequest(async (request, response) => {
   cors(request, response, async () => {
     try {
       const q: any = request.method === "GET" ? request.query : request.body;
@@ -4613,8 +4614,14 @@ export const PlayercardAPI = functions.runWith({ memory: "256MB" }).https.onRequ
         }
       }
 
-      const directChildrenSnapshot = await admin.database().ref(`${tournament.Users_DB}`).orderByChild("parentUid").equalTo(userId).once("value");
-      const directChildrenCount = directChildrenSnapshot.exists() ? directChildrenSnapshot.numChildren() : 0;
+      const childrenIdsSnapshot = await admin.database().ref(`${tournament.Users_DB}/${userId}/childrenIds`).once("value");
+      let directChildrenCount = countDirectChildrenFromValue(childrenIdsSnapshot.val());
+
+      if (!childrenIdsSnapshot.exists()) {
+        const legacyDirectChildrenSnapshot = await admin.database().ref(`${tournament.Users_DB}`).orderByChild("parentUid").equalTo(userId).once("value");
+        directChildrenCount = legacyDirectChildrenSnapshot.exists() ? legacyDirectChildrenSnapshot.numChildren() : 0;
+      }
+
       const qualified = directChildrenCount >= 5;
 
       const membership = deriveMembershipFromUserNode(userSnap.val() || {});
@@ -4646,13 +4653,11 @@ export const PlayercardAPI = functions.runWith({ memory: "256MB" }).https.onRequ
         } : null
       });
     } catch (error) {
-      console.error("PlayercardAPI error:", error);
+      console.error("PlayerCardAPI error:", error);
       return response.status(500).json({ error: "Internal Server Error" });
     }
   });
 });
-
-export const PlayerCardAPI = PlayercardAPI;
 
 // export const ListUsersWithWithdrawalHistory = functions.https.onRequest(async (request, response) => {
 //   try {
