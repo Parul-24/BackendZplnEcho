@@ -20,7 +20,7 @@ import {
 } from "./tournament";
 
 import {Weekly_Coins_Reward} from "./schedule_tasks"
-
+import * as usernameAvailability from "./username_availability";
 
 
 export const DefaultTimeZone = 'Etc/GMT' // 'America/Los_Angeles';
@@ -85,22 +85,54 @@ export const deleteUsers = (uids: string[])=>{
 };
 
 export async function CreateUserFromJson(userId: string, userName: string, phone:string, parentId: string, savedAvatarURL: string): Promise<DataSnapshot> {
+     const usernameValidation = usernameAvailability.validateUsername(userName);
+     if (!usernameValidation.valid) {
+         throw new Error(usernameValidation.error || "Invalid username.");
+     }
+
+     const isAvailable = await usernameAvailability.isUsernameAvailable(userName, userId, 2000);
+     if (!isAvailable) {
+         throw new Error("Username already taken.");
+     }
+
+     const hasReserved = await usernameAvailability.reserveUsernameForUser(userId, userName);
+     if (!hasReserved) {
+         throw new Error("Username already taken.");
+     }
+
      await admin.database().ref(Users_DB)
         .child(userId).update({
             userName: userName,
             phone: phone,
             SavedAvatarURL: savedAvatarURL,
             userId: userId,
-            parentId: parentId
+            parentId: parentId,
+            normalizedUserName: usernameValidation.normalized
         }
     )
     return await admin.database().ref(Users_DB+"/"+userId).once('value');
 }
 
 export async function SetUsernameOfUser(userId: string, userName: string): Promise<DataSnapshot> {
+    const usernameValidation = usernameAvailability.validateUsername(userName);
+    if (!usernameValidation.valid) {
+        throw new Error(usernameValidation.error || "Invalid username.");
+    }
+
+    const isAvailable = await usernameAvailability.isUsernameAvailable(userName, userId, 2000);
+    if (!isAvailable) {
+        throw new Error("Username already taken.");
+    }
+
+    const hasReserved = await usernameAvailability.reserveUsernameForUser(userId, userName);
+    if (!hasReserved) {
+        throw new Error("Username already taken.");
+    }
+
     await admin.database().ref(Users_DB)
        .child(userId).update({
-           userName: userName
+           userName: userName,
+           normalizedUserName: usernameValidation.normalized
        }
    )
    return await admin.database().ref(Users_DB+"/"+userId).once('value');
@@ -332,26 +364,19 @@ export async function checkUserName(userName: string, phoneNumber: string|null):
 }
 
 async function checkUser(userName: string|null): Promise<any> {
-    if (userName === null) return {exists:0, userId: null};
+    const validation = usernameAvailability.validateUsername(userName);
+    if (!validation.valid) return {exists:0, userId: null};
 
-    const normalizedInput = String(userName).trim().toLowerCase();
-    const userData = await admin.database().ref(Users_DB).once('value');
+    const usernameRef = usernameAvailability.getUsernameIndexRef(validation.normalized);
+    const snapshot = await usernameRef.once('value');
+    const userId = snapshot.val();
 
-    const databaseName = admin.database().ref().toString();
-    console.log(`Firebase Realtime Database Name: ${databaseName}`);
+    if (userId === null || userId === undefined) {
+        return {exists: 0, userId: null};
+    }
 
-    let result = {exists: 0, userId: ""};
-    userData.forEach((user) => {
-        const storedUserName = String(user.child("userName").val() ?? "").trim().toLowerCase();
-        if (storedUserName === normalizedInput) {
-            result.exists = 1;
-            result.userId = user.key as string;
-            console.log("checkUser ========================= user: " + user.key);
-            return true;
-        }
-        return false;
-    });
-    return result;
+    console.log("checkUser ========================= user: " + userId);
+    return {exists: 1, userId: String(userId)};
 }
 
 export async function checkPhone(phoneNumber: string|null): Promise<any> {

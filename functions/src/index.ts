@@ -33,15 +33,158 @@ import { countDirectChildrenFromValue } from "./player_card_utils";
 const { normalizeInviteCodeCandidate, extractParentInviteCodeCandidateFromRequestData } = require("./invite_link_utils");
 import * as analytics_apis from "./analytics_apis";
 import * as ingame_popups from "./ingame_popups";
+import * as usernameAvailability from "./username_availability";
 //import * as tournament_cards from "./tournament_cards";
 const Busboy = require('busboy');
 
+const allowedCorsOrigins = [
+  "https://zpln-3be94.web.app",
+  "https://echopro.vip",
+  "http://localhost:4200",
+  "https://localhost:4200"
+];
 
 const cors = require("cors")({
-  origin: ["https://zpln-3be94.web.app","https://echopro.vip"],
+  origin: (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) => {
+    if (!origin || allowedCorsOrigins.includes(origin)) {
+      callback(null, true);
+      return;
+    }
+
+    callback(new Error("Not allowed by CORS"));
+  },
   methods: ["GET", "POST", "OPTIONS"],
   allowedHeaders: ["Content-Type", "Authorization"]
 });
+
+const usernameRequestTracker = new Map<string, { count: number; resetAt: number }>();
+
+function isUsernameApiRateLimited(request: any, maxRequests: number = 20, windowMs: number = 60000): boolean {
+  const clientIp = String(
+    request.headers["x-forwarded-for"] ||
+    request.headers["x-real-ip"] ||
+    request.ip ||
+    "anonymous"
+  );
+
+  const now = Date.now();
+  const entry = usernameRequestTracker.get(clientIp);
+  if (!entry || now >= entry.resetAt) {
+    usernameRequestTracker.set(clientIp, { count: 1, resetAt: now + windowMs });
+    return false;
+  }
+
+  if (entry.count >= maxRequests) {
+    return true;
+  }
+
+  entry.count += 1;
+  return false;
+}
+
+export function getBearerTokenFromAuthorizationHeader(authorizationHeader?: string): string | null {
+  if (!authorizationHeader || !authorizationHeader.startsWith("Bearer ")) {
+    return null;
+  }
+
+  const token = authorizationHeader.slice("Bearer ".length).trim();
+  return token ? token : null;
+}
+
+export function normalizePhoneNumber(value: string | null | undefined): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const normalized = value.replace(/\s+/g, "").replace(/[^\d+]/g, "").trim();
+  if (!normalized) {
+    return null;
+  }
+
+  if (normalized.startsWith("+") && normalized.length > 1) {
+    return `+${normalized.replace(/\+/g, "")}`;
+  }
+
+  return normalized;
+}
+
+export function buildPhoneSyncUpdatePayload(
+  firebaseUid: string,
+  phoneNumber: string,
+  existingRecord: Record<string, any> | null = null
+): Record<string, any> {
+  const normalizedPhone = normalizePhoneNumber(phoneNumber);
+  if (!normalizedPhone) {
+    throw new Error("Invalid phone number.");
+  }
+
+  const currentPhone = normalizePhoneNumber(
+    existingRecord && typeof existingRecord.phone === "string" ? existingRecord.phone : null
+  );
+
+  if (currentPhone && currentPhone !== normalizedPhone) {
+    throw new Error(`Phone mismatch: user record already has ${currentPhone}, cannot overwrite with ${normalizedPhone}.`);
+  }
+
+  const now = Date.now();
+  return {
+    firebaseUid,
+    phone: normalizedPhone,
+    phoneVerified: true,
+    phoneVerifiedAt: now,
+    updatedAt: now,
+  };
+}
+
+export async function requireFirebaseUserFromRequest(request: functions.https.Request): Promise<{
+  uid: string;
+  decodedToken: admin.auth.DecodedIdToken;
+  userRecord: admin.auth.UserRecord;
+}> {
+  const authorizationHeader = request.headers.authorization;
+  const idToken = getBearerTokenFromAuthorizationHeader(
+    typeof authorizationHeader === "string" ? authorizationHeader : undefined
+  );
+
+  if (!idToken) {
+    throw new Error("Missing Authorization bearer token.");
+  }
+
+  const decodedToken = await admin.auth().verifyIdToken(idToken);
+  const userRecord = await admin.auth().getUser(decodedToken.uid);
+
+  if (!userRecord.phoneNumber && !decodedToken.phone_number) {
+    throw new Error("Firebase account has no phone number. Complete phone auth before syncing.");
+  }
+
+  return {
+    uid: decodedToken.uid,
+    decodedToken,
+    userRecord,
+  };
+}
+
+export async function syncVerifiedPhoneRecordForFirebaseUid(firebaseUid: string, phoneNumber: string): Promise<Record<string, any>> {
+  const normalizedPhone = normalizePhoneNumber(phoneNumber);
+  if (!normalizedPhone) {
+    throw new Error("Invalid phone number.");
+  }
+
+  const userRef = admin.database().ref(`${Users_DB}/${firebaseUid}`);
+  const snap = await userRef.once("value");
+  const existingRecord = (snap.val() as Record<string, any>) || {};
+
+  const updatePayload = buildPhoneSyncUpdatePayload(firebaseUid, normalizedPhone, existingRecord);
+  await userRef.update(updatePayload);
+
+  return {
+    uid: firebaseUid,
+    phone: normalizedPhone,
+    phoneVerified: true,
+    phoneVerifiedAt: updatePayload.phoneVerifiedAt,
+    updatedAt: updatePayload.updatedAt,
+  };
+}
 
 admin.initializeApp(appOptions);
 
@@ -564,22 +707,25 @@ export const CheckUserName = functions.runWith({ memory: "512MB" }).https.onRequ
 //   });
 
 
-export const CheckIfUserExistForPhoneNumber = functions.runWith({ memory: "512MB" }).https.onRequest(async (request, response) => {
-  console.log("CheckIfUserExistForPhoneNumber --- " + request.query.phoneNumber);
+export const CheckIfUserExistForPhoneNumber = functions.runWith({ memory: "512MB" }).https.onRequest((request, response) => {
+  cors(request, response, async () => {
+    console.log("CheckIfUserExistForPhoneNumber --- " + request.query.phoneNumber);
 
-  let phoneNumber: string | null = String(request.query.phoneNumber);
-  if (request.query.phoneNumber === undefined || phoneNumber === "") {
-    phoneNumber = null;
-  }
-  
-  const phoneResponse = await utils.checkPhone(phoneNumber);
-  console.log("json phoneResponse: " + JSON.stringify(phoneResponse));
+    let phoneNumber: string | null = String(request.query.phoneNumber);
+    if (request.query.phoneNumber === undefined || phoneNumber === "") {
+      phoneNumber = null;
+    }
 
-  let userAlreadyExists = false;
-  if(phoneResponse.exists)
-    userAlreadyExists = true;
+    const phoneResponse = await utils.checkPhone(phoneNumber);
+    console.log("json phoneResponse: " + JSON.stringify(phoneResponse));
 
-  response.send(userAlreadyExists);
+    let userAlreadyExists = false;
+    if (phoneResponse.exists) {
+      userAlreadyExists = true;
+    }
+
+    response.send(userAlreadyExists);
+  });
 });
 
 export const CheckUserPin = functions.runWith({ memory: "256MB" }).https.onRequest(async (request, response) => {
@@ -651,76 +797,225 @@ export const IsUserAuthenticated = functions.runWith({ memory: "256MB" }).https.
   }
 });
 
-export const GetUserIdFromUsernameAndNumber = functions.runWith({ memory: "256MB" }).https.onRequest(async (request, response) => {
-
-  if (request.query.username === undefined) {
-    response.send("Missing Username.");
-    return;
-  }
-
-  if (request.query.number === undefined) {
-    response.send("Missing Number.");
-    return;
-  }
-
-  let authUserFromNumber;
-  try {
-    authUserFromNumber = await admin.auth().getUserByPhoneNumber(String(request.query.number));
-  } catch (error) {
-    response.send('Not Present');//user with the passed phonenumber doesn't exist
-    return;
-  }
-
-  const userVal = await admin.database().ref(Users_DB + "/" + authUserFromNumber.uid).once('value');;
-
-  if (userVal.child("userName").exists()) {
-    const userName = userVal.child("userName").val();
-    if (userName === String(request.query.username)) {
-      response.send(authUserFromNumber.uid);
-      return;
-    }else {
-      response.send('Not Present');//username match failed
+export const GetUserIdFromUsernameAndNumber = functions.runWith({ memory: "256MB" }).https.onRequest((request, response) => {
+  cors(request, response, async () => {
+    if (request.query.username === undefined) {
+      response.send("Missing Username.");
       return;
     }
-  }else {
-    response.send('Not Present');//username doens't exist for the user. 
-    return;
-  }
 
+    if (request.query.number === undefined) {
+      response.send("Missing Number.");
+      return;
+    }
 
-  // const usersRef = admin.database().ref(Users_DB);
-  // await usersRef.once('value', async (snapshot) => {
+    let authUserFromNumber;
+    try {
+      authUserFromNumber = await admin.auth().getUserByPhoneNumber(String(request.query.number));
+    } catch (error) {
+      response.send('Not Present');//user with the passed phonenumber doesn't exist
+      return;
+    }
 
-  //   const users = await snapshot.val();
+    const userVal = await admin.database().ref(Users_DB + "/" + authUserFromNumber.uid).once('value');
 
-  //   const matchedUser = Object.keys(users).filter((userId) => {
-  //     const user = users[userId];
-  //     return user.userName === request.query.username && user.phone === request.query.number;
-  //   });
+    if (userVal.child("userName").exists()) {
+      const userName = userVal.child("userName").val();
+      if (userName === String(request.query.username)) {
+        response.send(authUserFromNumber.uid);
+        return;
+      } else {
+        response.send('Not Present');//username match failed
+        return;
+      }
+    } else {
+      response.send('Not Present');//username doens't exist for the user.
+      return;
+    }
 
-  //   if (matchedUser.length > 0) {
-  //     response.send(matchedUser[0]);
-  //   } else {
-  //     response.send('Not Present');
-  //   }
-  // }, (error) => {
-  //   console.error('Error retrieving users:', error);
-  //   response.send('Error retrieving users');
-  // });
+    // const usersRef = admin.database().ref(Users_DB);
+    // await usersRef.once('value', async (snapshot) => {
+    //   const users = await snapshot.val();
+    //   const matchedUser = Object.keys(users).filter((userId) => {
+    //     const user = users[userId];
+    //     return user.userName === request.query.username && user.phone === request.query.number;
+    //   });
+    //   if (matchedUser.length > 0) {
+    //     response.send(matchedUser[0]);
+    //   } else {
+    //     response.send('Not Present');
+    //   }
+    // }, (error) => {
+    //   console.error('Error retrieving users:', error);
+    //   response.send('Error retrieving users');
+    // });
+  });
 });
 
-export const GetUserIdFromUsername = functions.runWith({ memory: "256MB" }).https.onRequest(async (request, response) => {
-  const userName = String(request.query.userName || "").trim();
-  if (!userName) {
-    response.status(400).send({ errorno: 5001, message: "Error missing userName", userId: null });
+export const GetUserIdFromUsername = functions.runWith({ memory: "256MB" }).https.onRequest((request, response) => {
+  cors(request, response, async () => {
+    const userName = String(request.query.userName || "").trim();
+    if (!userName) {
+      response.status(400).send({ errorno: 5001, message: "Error missing userName", userId: null });
+      return;
+    }
+
+    const result: any = await utils.checkUserName(userName, null);
+    if (result.userId) {
+      response.send({ errorno: -1, message: "Found", userId: result.userId });
+    } else {
+      response.send({ errorno: 5002, message: "Not Present", userId: null });
+    }
+  });
+});
+
+export const CheckUsernameAvailabilityAPI = functions.runWith({ memory: "256MB" }).https.onRequest((request, response) => {
+  cors(request, response, async () => {
+    const requestId = `${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
+
+    if (isUsernameApiRateLimited(request, 20, 60000)) {
+      response.status(429).json({ success: false, error: "Too many requests. Please try again later." });
+      return;
+    }
+
+    const rawUserName = String(request.query.userName ?? "").trim();
+    const validation = usernameAvailability.validateUsername(rawUserName);
+
+    if (!validation.valid) {
+      console.log(JSON.stringify({
+        event: "CheckUsernameAvailabilityAPI",
+        requestId,
+        normalizedUsername: validation.normalized || null,
+        outcome: "invalid",
+        error: validation.error
+      }));
+
+      response.status(400).json({ success: false, error: validation.error || "Username is invalid." });
+      return;
+    }
+
+    try {
+      const available = await usernameAvailability.isUsernameAvailable(rawUserName, null, 1500);
+      const payload = {
+        success: true,
+        username: rawUserName,
+        normalizedUsername: validation.normalized,
+        available
+      };
+
+      console.log(JSON.stringify({
+        event: "CheckUsernameAvailabilityAPI",
+        requestId,
+        normalizedUsername: validation.normalized,
+        available
+      }));
+
+      response.status(200).json(payload);
+    } catch (error) {
+      console.error(JSON.stringify({
+        event: "CheckUsernameAvailabilityAPI",
+        requestId,
+        normalizedUsername: validation.normalized,
+        error: error instanceof Error ? error.message : String(error)
+      }));
+
+      response.status(500).json({ success: false, error: "Unable to verify username availability right now." });
+    }
+  });
+});
+
+export const SuggestEchoProUsernamesAPI = functions.runWith({ memory: "256MB" }).https.onRequest(async (request, response) => {
+  const requestId = `${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
+
+  if (isUsernameApiRateLimited(request, 10, 60000)) {
+    response.status(429).json({ success: false, error: "Too many requests. Please try again later." });
     return;
   }
 
-  const result: any = await utils.checkUserName(userName, null);
-  if (result.userId) {
-    response.send({ errorno: -1, message: "Found", userId: result.userId });
-  } else {
-    response.send({ errorno: 5002, message: "Not Present", userId: null });
+  const firstName = String(request.query.firstName ?? "").trim();
+  const lastName = String(request.query.lastName ?? "").trim();
+  const currentUserName = String(request.query.currentUserName ?? "").trim();
+
+  if (!firstName && !lastName) {
+    console.log(JSON.stringify({
+      event: "SuggestEchoProUsernamesAPI",
+      requestId,
+      outcome: "invalid",
+      error: "First name or last name is required."
+    }));
+
+    response.status(400).json({ success: false, error: "First name or last name is required." });
+    return;
+  }
+
+  try {
+    const candidates = usernameAvailability.generateUsernameSuggestions(firstName || null, lastName || null, currentUserName || null);
+    const verifiedSuggestions: string[] = [];
+
+    for (const candidate of candidates) {
+      const isAvailable = await usernameAvailability.isUsernameAvailable(candidate, null, 1500);
+      if (isAvailable) {
+        verifiedSuggestions.push(candidate);
+      }
+
+      if (verifiedSuggestions.length >= 3) {
+        break;
+      }
+    }
+
+    console.log(JSON.stringify({
+      event: "SuggestEchoProUsernamesAPI",
+      requestId,
+      firstName: firstName ? usernameAvailability.normalizeUsernameInput(firstName) : null,
+      lastName: lastName ? usernameAvailability.normalizeUsernameInput(lastName) : null,
+      suggestionCount: verifiedSuggestions.length
+    }));
+
+    response.status(200).json({ success: true, suggestions: verifiedSuggestions });
+  } catch (error) {
+    console.error(JSON.stringify({
+      event: "SuggestEchoProUsernamesAPI",
+      requestId,
+      error: error instanceof Error ? error.message : String(error)
+    }));
+
+    response.status(500).json({ success: false, error: "Unable to generate username suggestions right now." });
+  }
+});
+
+export const RebuildUsernameIndexAPI = functions.runWith({ memory: "512MB" }).https.onRequest(async (request, response) => {
+  const requestId = `${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
+
+  if (isUsernameApiRateLimited(request, 5, 60000)) {
+    response.status(429).json({ success: false, error: "Too many requests. Please try again later." });
+    return;
+  }
+
+  try {
+    const result = await usernameAvailability.rebuildUsernameIndex();
+    console.log(JSON.stringify({
+      event: "RebuildUsernameIndexAPI",
+      requestId,
+      scanned: result.scanned,
+      updated: result.updated,
+      removed: result.removed
+    }));
+
+    response.status(200).json({
+      success: true,
+      scanned: result.scanned,
+      updated: result.updated,
+      removed: result.removed,
+      message: "Canonical username index rebuilt successfully."
+    });
+  } catch (error) {
+    console.error(JSON.stringify({
+      event: "RebuildUsernameIndexAPI",
+      requestId,
+      error: error instanceof Error ? error.message : String(error)
+    }));
+
+    response.status(500).json({ success: false, error: "Unable to rebuild username index right now." });
   }
 });
 
@@ -3102,13 +3397,45 @@ export const GetMyTop5Players = functions.runWith({ memory: "256MB" }).https.onR
 
   try {
     const result = await vault.getTopPlayersInSpillTreeByMiningRank(userId, 3, 10);
+
+    let checkedUserLevel = 0;
+    let cursor = userId;
+    while (cursor) {
+      const userSnap = await admin.database().ref(`${tournament.Users_DB}/${cursor}`).once("value");
+      if (!userSnap.exists()) {
+        break;
+      }
+
+      const parentUid = String(userSnap.child("parentUid").val() || userSnap.child("parentId").val() || "").trim();
+      if (!parentUid || parentUid === "00000-00000") {
+        break;
+      }
+
+      checkedUserLevel += 1;
+      cursor = parentUid;
+    }
+
+    const checkedUserLevelNumber = Math.min(3, Math.max(1, checkedUserLevel || 1));
+    const checkedUserLevelLabel = `L${checkedUserLevelNumber}`;
+    const playersWithLevelLabel = (result.players || []).map((player: any) => {
+      const spillLevel = Number(player?.spillLevel || 1);
+      const normalizedLevel = Math.min(3, Math.max(1, spillLevel));
+      return {
+        ...player,
+        levelNumber: normalizedLevel,
+        levelLabel: `L${normalizedLevel}`
+      };
+    });
+
     response.status(200).json({
       Action: "GetMyTop5Players",
       UserId: userId,
+      CheckedUserLevelNumber: checkedUserLevelNumber,
+      CheckedUserLevel: checkedUserLevelLabel,
       MaxLevel: 3,
       Limit: 10,
       TotalCandidates: result.totalCandidates,
-      Players: result.players
+      Players: playersWithLevelLabel
     });
   } catch (err) {
     console.error("GetMyTop5Players error for user:", userId, err);
@@ -3492,6 +3819,54 @@ export const TestIsUserCallingApiAuthenticated = functions.runWith({ memory: "25
     .catch((error) => {
       res.status(403).send('Unauthorized <br>--- Error verifying ID token:' + error);
     });
+});
+
+export const SyncFirebasePhoneVerificationAPI = functions.runWith({ memory: "256MB" }).https.onRequest(async (req, res) => {
+  return cors(req, res, async () => {
+    if (req.method !== "POST") {
+      res.status(405).json({
+        success: false,
+        error: "This endpoint only accepts POST requests."
+      });
+      return;
+    }
+
+    try {
+      const authData = await requireFirebaseUserFromRequest(req);
+      const firebasePhoneNumber = normalizePhoneNumber(authData.userRecord.phoneNumber || authData.decodedToken.phone_number || null);
+
+      if (!firebasePhoneNumber) {
+        res.status(400).json({
+          success: false,
+          error: "Firebase auth user has no phoneNumber attached. Complete phone authentication first."
+        });
+        return;
+      }
+
+      const result = await syncVerifiedPhoneRecordForFirebaseUid(authData.uid, firebasePhoneNumber);
+      res.status(200).json({
+        success: true,
+        ...result,
+      });
+      return;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unknown error";
+      const errorCode = typeof error === "object" && error !== null && "code" in error ? String((error as any).code) : "";
+
+      if (errorCode === "auth/id-token-expired" || errorCode === "auth/argument-error" || message.includes("Missing Authorization")) {
+        res.status(401).json({
+          success: false,
+          error: "Unauthorized. Provide a valid Firebase ID token in the Authorization bearer header."
+        });
+        return;
+      }
+
+      res.status(400).json({
+        success: false,
+        error: message
+      });
+    }
+  });
 });
 
 export const TestCreateDynamicLinkForInviteCode = functions.runWith({ memory: "256MB" }).https.onRequest(async (req, res) => {
@@ -3994,30 +4369,39 @@ export const GetChildrenDetailsAPI = functions.runWith({ memory: "256MB" }).http
 // });
 
   export const TimeRemainingForEventToEnd = functions.runWith({ memory: "256MB" }).https.onRequest(async (request, response) => {
+    try {
+      const eventId = String(request.query.eventId || "").trim();
+      if (!eventId) {
+        response.status(400).json({ error: "Missing eventId" });
+        return;
+      }
 
-    console.log("---------------1");
-    const eventId = String(request.query.eventId);
-    const eventIdVal = (await admin.database().ref(tournament.Active_Tournaments_DB + "/" + eventId).once('value')).val();
-    const remainingHours = eventIdVal.remainsHours;
+      const eventSnap = await admin.database().ref(`${tournament.Active_Tournaments_DB}/${eventId}`).once("value");
+      if (!eventSnap.exists()) {
+        response.status(404).json({ error: "Event not found", eventId });
+        return;
+      }
 
-    let myObj: { [key: string]: any } = {};
-    const todayStart = utils.getTodayStart();
-    // myObj.todayStart = todayStart;
-    const endDateTime = utils.addHoursToDate(todayStart, remainingHours);
-    // myObj.endDateTime = endDateTime;
-    let secondsRemaining = Math.floor((endDateTime.getTime() - todayStart.getTime()) / 1000);
-    // myObj.minutesRemaining = secondsRemaining/60;
-    const secondsPassedToday = utils.getSecondsSinceStartOfDayPST();
-    // myObj.minutesPassedToday = secondsPassedToday/60;
-    secondsRemaining -= secondsPassedToday;
-    // myObj.actual_timeRemainingInHours = (secondsRemaining/3600);
-    // myObj.actual_timeRemainingInMinutes = (secondsRemaining/60);
-    // myObj.actual_timeRemainingInSeconds = (secondsRemaining);
-    myObj.timeRemainingInSeconds = (secondsRemaining);
+      const remainingHours = Number(eventSnap.child("remainsHours").val() ?? 0);
+      if (!Number.isFinite(remainingHours)) {
+        response.status(400).json({ error: "Invalid remainsHours for event", eventId });
+        return;
+      }
 
-    response.send(
-      myObj
-    );
+      const todayStart = utils.getTodayStart();
+      const endDateTime = utils.addHoursToDate(todayStart, remainingHours);
+      let secondsRemaining = Math.floor((endDateTime.getTime() - todayStart.getTime()) / 1000);
+      const secondsPassedToday = utils.getSecondsSinceStartOfDayPST();
+      secondsRemaining -= secondsPassedToday;
+
+      response.status(200).json({
+        eventId,
+        timeRemainingInSeconds: secondsRemaining
+      });
+    } catch (error) {
+      console.error("TimeRemainingForEventToEnd error:", error);
+      response.status(500).json({ error: "Internal Server Error" });
+    }
   });
 
   export const GetCoinsForUser = functions.runWith({ memory: "256MB" }).https.onRequest(async (request, response) => {
@@ -4584,17 +4968,22 @@ export const PlayerCardAPI = functions.runWith({ memory: "512MB" }).https.onRequ
         return response.status(404).json({ error: "User not found", userId });
       }
 
-      const firstName = String(userSnap.child("firstName").val() || "").trim();
-      const lastName = String(userSnap.child("lastName").val() || "").trim();
-      const userName = String(userSnap.child("userName").val() || "").trim() || `${firstName} ${lastName}`.trim() || userId;
-      const globalAverage = Number(userSnap.child("globalAverage").val() || 0);
+      await audience.createInviteCodeIfDoesntAlreadyExists(userId);
+      const refreshedUserSnap = await admin.database().ref(`${tournament.Users_DB}/${userId}`).once("value");
+
+      const firstName = String(refreshedUserSnap.child("firstName").val() || "").trim();
+      const lastName = String(refreshedUserSnap.child("lastName").val() || "").trim();
+      const userName = String(refreshedUserSnap.child("userName").val() || "").trim() || `${firstName} ${lastName}`.trim() || userId;
+      const inviteCode = String(refreshedUserSnap.child(audience.FieldInviteCode).val() || "").trim();
+      const inviteLink = String(refreshedUserSnap.child(audience.FieldInviteLink).val() || "").trim();
+      const globalAverage = Number(refreshedUserSnap.child("globalAverage").val() || 0);
       const playRankEnum = await vault.getPlayRankForUser(userId);
       const playRankName = playRankEnum !== null ? vault.determinePlayRankNameFromAverage(globalAverage) : "Celestial";
 
       const miningRankEnum = Number(userSnap.child(`${vault.Vault_User_DB}/${vault.MiningRank_Vault_User_DB}`).val() || 1);
       const miningRankName = vault.getMiningRankDisplayName(miningRankEnum);
 
-      const parentUid = String(userSnap.child("parentUid").val() || userSnap.child("parentId").val() || "").trim();
+      const parentUid = String(refreshedUserSnap.child("parentUid").val() || refreshedUserSnap.child("parentId").val() || "").trim();
       let parent: { userId: string; firstName: string; lastName: string; userName: string; fullName: string } | null = null;
 
       if (parentUid) {
@@ -4624,7 +5013,7 @@ export const PlayerCardAPI = functions.runWith({ memory: "512MB" }).https.onRequ
 
       const qualified = directChildrenCount >= 5;
 
-      const membership = deriveMembershipFromUserNode(userSnap.val() || {});
+      const membership = deriveMembershipFromUserNode(refreshedUserSnap.val() || {});
 
       return response.status(200).json({
         success: true,
@@ -4632,6 +5021,8 @@ export const PlayerCardAPI = functions.runWith({ memory: "512MB" }).https.onRequ
         username: userName,
         firstName,
         lastName,
+        inviteCode,
+        inviteLink,
         playRank: {
           enum: playRankEnum ?? 1,
           name: playRankName
@@ -5125,7 +5516,8 @@ export const RegisterEchoProUserAPI = functions.runWith({ memory: "256MB" }).htt
       const email = firstNonEmpty(q.email);
       const parentInviteCode = normalizeInviteCodeCandidate(firstNonEmpty(q.parentInviteCode, q.inviteCode, q.code, q.inviteLink, q.link, q.url));
       const savedAvatarURL = firstNonEmpty(q.savedAvatarURL, q.SavedAvatarURL);
-      const userName = `${firstName} ${lastName}`.trim();
+      const explicitUserName = firstNonEmpty(q.userName, q.username, q.user_name);
+      const userName = explicitUserName || `${firstName} ${lastName}`.trim();
       const explicitMembershipType = firstNonEmpty(q.membershipType, q.planType);
       const inferredMembershipType = (asBoolean(q.isEchoPro) || asBoolean(q.isPaid))
         ? MEMBERSHIP_TYPE_PAID
@@ -5496,6 +5888,72 @@ export const LoginEchoProUserAPI = functions.runWith({ memory: "256MB" }).https.
   });
 });
 
+export const LoginUserAPI = functions.runWith({ memory: "256MB" }).https.onRequest((request, response) => {
+  cors(request, response, async () => {
+    try {
+      const q: any = request.method === "GET" ? request.query : request.body;
+      const idToken = String(q.idToken || q.token || "").trim();
+      const phone = String(q.phone || "").trim();
+
+      if (!idToken) {
+        return response.status(400).json({
+          success: false,
+          error: "Missing idToken"
+        });
+      }
+
+      let decoded;
+      try {
+        decoded = await admin.auth().verifyIdToken(idToken);
+      } catch {
+        return response.status(401).json({
+          success: false,
+          error: "Invalid or expired token"
+        });
+      }
+
+      const uid = decoded.uid;
+
+      if (phone) {
+        const authUser = await admin.auth().getUser(uid);
+        const authPhone = String(authUser.phoneNumber || "").trim();
+
+        if (!authPhone || authPhone !== phone) {
+          return response.status(401).json({
+            success: false,
+            error: "Phone/token mismatch"
+          });
+        }
+      }
+
+      const userSnap = await admin.database().ref(`${tournament.Users_DB}/${uid}`).once("value");
+
+      if (!userSnap.exists()) {
+        return response.status(404).json({
+          success: false,
+          error: "User not found in Users DB. Please register first."
+        });
+      }
+
+      const user = userSnap.val() || {};
+      await userSnap.ref.child("lastLoginAt").set(Date.now());
+
+      return response.status(200).json({
+        success: true,
+        userId: uid,
+        user,
+        phone: user.phone || null,
+        userName: user.userName || null
+      });
+    } catch (err) {
+      console.error("LoginUserAPI error:", err);
+      return response.status(500).json({
+        success: false,
+        error: "Internal Server Error"
+      });
+    }
+  });
+});
 
 export const GetCountryCodesAPI = functions.runWith({ memory: "256MB" }).https.onRequest((request, response) => {
   cors(request, response, async () => {
@@ -6054,7 +6512,19 @@ type SpillTreeSortableChild = {
   miningRank: string;
   existsInUsersDb: boolean;
   level?: number;
+  levelNumber?: number;
+  levelLabel?: string;
 };
+
+function getSpillTreeLevelNumber(level?: number): number {
+  const normalized = Number(level ?? 1);
+  if (!Number.isFinite(normalized)) return 1;
+  return Math.min(3, Math.max(1, Math.floor(normalized)));
+}
+
+function getSpillTreeLevelLabel(level?: number): string {
+  return `L${getSpillTreeLevelNumber(level)}`;
+}
 
 function getNextRankProgressCountForSort(
   miningRankEnum: number,
@@ -6115,10 +6585,13 @@ async function buildAndSortSpillTreeChildren(
     const counts = progressCounts[idx];
 
     if (!snap.exists()) {
+      const normalizedLevel = getSpillTreeLevelNumber(levelMap ? (levelMap[childId] || 1) : 1);
       return {
         child: {
           userId: childId,
-          level: levelMap ? (levelMap[childId] || 0) : undefined,
+          level: normalizedLevel,
+          levelNumber: normalizedLevel,
+          levelLabel: getSpillTreeLevelLabel(normalizedLevel),
           userName: "",
           firstName: "",
           lastName: "",
@@ -6144,10 +6617,13 @@ async function buildAndSortSpillTreeChildren(
       snap.child(`${vault.Vault_User_DB}/${vault.MiningRank_Vault_User_DB}`).val() || 1
     );
 
+    const normalizedLevel = getSpillTreeLevelNumber(levelMap ? (levelMap[childId] || 1) : 1);
     return {
       child: {
         userId: childId,
-        level: levelMap ? (levelMap[childId] || 0) : undefined,
+        level: normalizedLevel,
+        levelNumber: normalizedLevel,
+        levelLabel: getSpillTreeLevelLabel(normalizedLevel),
         userName,
         firstName,
         lastName,
@@ -6860,6 +7336,13 @@ export const GetSpillTreeLevelCountsAPI = functions.runWith({ memory: "256MB" })
       }
 
       const traversedLevels = Math.max(level - 1, 0);
+      const levelLabels: Record<string, string> = {};
+      Object.keys(levelCounts).forEach((key) => {
+        const levelNumber = Number(String(key).replace(/^level/i, ""));
+        if (Number.isFinite(levelNumber) && levelNumber > 0) {
+          levelLabels[key] = `L${Math.min(3, Math.max(1, levelNumber))}`;
+        }
+      });
 
       return response.status(200).json({
         success: true,
@@ -6869,6 +7352,7 @@ export const GetSpillTreeLevelCountsAPI = functions.runWith({ memory: "256MB" })
         maxLevel: traversedLevels,
         traversedLevels,
         ...levelCounts,
+        levelLabels,
         totalDescendants: allDescendants.size
       });
     } catch (err) {
